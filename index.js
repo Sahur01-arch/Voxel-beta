@@ -197,6 +197,19 @@ async function startNazeBot() {
 	
 	const level = pino({ level: 'silent' });
 	const { version } = await fetchLatestWaWebVersion();
+	if (pairingCode && !phoneNumber && !fs.existsSync('./nazedev/creds.json')) {
+		fs.rmSync('./nazedev', { recursive: true, force: true });
+		async function getPhoneNumber() {
+			phoneNumber = global.number_bot ? global.number_bot : process.env.BOT_NUMBER || await question('Please type your WhatsApp number : ');
+			phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+			if (!parsePhoneNumber('+' + phoneNumber).valid && phoneNumber.length < 6) {
+				console.log(chalk.bgBlack(chalk.redBright('Start with your Country WhatsApp code') + chalk.whiteBright(',') + chalk.greenBright(' Example : 62xxx')));
+				await getPhoneNumber();
+			}
+		}
+		await getPhoneNumber();
+		console.log('Phone number captured. Waiting for Connection...\n' + chalk.blueBright('Estimated time: around 2 ~ 5 minutes'));
+	}
 	const { state, saveCreds } = await useMultiFileAuthState('nazedev');
 	const getMessage = async (key) => {
 		if (global.store) {
@@ -234,24 +247,7 @@ async function startNazeBot() {
 			creds: state.creds,
 			keys: makeCacheableSignalKeyStore(state.keys, level),
 		},
-	})
-	
-	if (pairingCode && !phoneNumber && !naze.authState.creds.registered) {
-		async function getPhoneNumber() {
-			phoneNumber = global.number_bot ? global.number_bot : process.env.BOT_NUMBER || await question('Please type your WhatsApp number : ');
-			phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-			
-			if (!parsePhoneNumber('+' + phoneNumber).valid && phoneNumber.length < 6) {
-				console.log(chalk.bgBlack(chalk.redBright('Start with your Country WhatsApp code') + chalk.whiteBright(',') + chalk.greenBright(' Example : 62xxx')));
-				await getPhoneNumber()
-			}
-		}
-		(async () => {
-			await getPhoneNumber();
-			fs.rmSync('./nazedev', { recursive: true, force: true });
-			console.log('Phone number captured. Waiting for Connection...\n' + chalk.blueBright('Estimated time: around 2 ~ 5 minutes'))
-		})()
-	}
+	});
 	
 	await Solving(naze, global.store)
 	

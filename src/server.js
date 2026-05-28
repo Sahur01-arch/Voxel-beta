@@ -227,6 +227,8 @@ async function setupDashboard(database, storeDB, naze) {
 			callback({ success: false, status: 500, message: 'Server Error!' });
 		}
 	});
+
+	return socket;
 }
 
 export { setupDashboard };

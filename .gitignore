@@ -2,6 +2,9 @@ settings.js
 
 node_modules/
 .env 
+<<<<<<< HEAD
 nazedev/
 database/
 yarn.lock
+=======
+>>>>>>> 5fdce575e94be1bbb076631a41cd1a432661a5c9

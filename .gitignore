@@ -1,1 +1,4 @@
 settings.js
+
+node_modules/
+.env 

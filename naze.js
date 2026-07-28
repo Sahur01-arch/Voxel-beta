@@ -27,7 +27,6 @@ import { ytMp4, ytMp3 } from './lib/scraper.js';
 import templateMenu from './lib/template_menu.js';
 import { toAudio, toPTT } from './lib/converter.js';
 import { GroupUpdate, LoadDataBase } from './src/message.js';
-import { JadiBot, StopJadiBot, ListJadiBot } from './src/jadibot.js';
 import { cmdAdd, cmdAddHit, addExpired, getPosition, getExpired, getStatus, checkStatus } from './src/database.js';
 import { rdGame, iGame, gameSlot, gameCasinoSolo, gameSamgongSolo, gameMerampok, gameBegal, daily, buy, setLimit, addLimit, addMoney, setMoney, transfer, Blackjack, SnakeLadder } from './lib/game.js';
 import { getRandom, getBuffer, fetchJson, runtime, clockString, sleep, isUrl, formatDate, formatp, generateProfilePicture, errorCache, normalize, runUpdate, updateSettings, parseMention, fixBytes, similarity, pickRandom, encodeToLetters, tarBackup } from './lib/function.js';
@@ -2262,29 +2261,7 @@ Select Bot Settings:
 				m.reply(`Sukses Mengakhiri Sesi ${command.split('del')[1]}!`)
 				delete chat_ai[m.sender];
 			}
-			break
-			case 'jadibot': {
-				if (!isPremium) return m.reply(global.mess.prem)
-				if (!isLimit) return m.reply(global.mess.limit)
-				const nmrnya = text ? text.replace(/[^0-9]/g, '') + '@s.whatsapp.net' : m.sender
-				const onWa = await naze.onWhatsApp(nmrnya)
-				if (!onWa.length > 0) return m.reply(global.mess.onWa)
-				await JadiBot(naze, nmrnya, m, store)
-				m.reply(`Gunakan ${prefix}stopjadibot\nUntuk Berhenti`)
-				setLimit(m, db)
-			}
-			break
-			case 'stopjadibot': case 'deljadibot': {
-				const nmrnya = text ? text.replace(/[^0-9]/g, '') + '@s.whatsapp.net' : m.sender
-				const onWa = await naze.onWhatsApp(nmrnya)
-				if (!onWa.length > 0) return m.reply(global.mess.onWa)
-				await StopJadiBot(naze, nmrnya, m)
-			}
-			break
-			case 'listjadibot': {
-				ListJadiBot(naze, m)
-			}
-			break
+			break	
 			
 			// Tools Menu
 			case 'fetch': case 'get': {
@@ -4306,9 +4283,6 @@ Select Bot Settings:
 │${setv} ${prefix}menfes (62xxx|fake name)
 │${setv} ${prefix}confes (62xxx|fake name)
 │${setv} ${prefix}roomai
-│${setv} ${prefix}jadibot 🔸️
-│${setv} ${prefix}stopjadibot
-│${setv} ${prefix}listjadibot
 │${setv} ${prefix}donasi
 │${setv} ${prefix}addsewa
 │${setv} ${prefix}delsewa
@@ -4579,9 +4553,6 @@ Select Bot Settings:
 │${setv} ${prefix}menfes (62xxx|fake name)
 │${setv} ${prefix}confes (62xxx|fake name)
 │${setv} ${prefix}roomai
-│${setv} ${prefix}jadibot 🔸️
-│${setv} ${prefix}stopjadibot
-│${setv} ${prefix}listjadibot
 │${setv} ${prefix}donasi
 │${setv} ${prefix}addsewa
 │${setv} ${prefix}delsewa

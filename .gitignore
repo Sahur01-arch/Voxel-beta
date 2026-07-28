@@ -2,3 +2,6 @@ settings.js
 
 node_modules/
 .env 
+nazedev/
+database/
+yarn.lock

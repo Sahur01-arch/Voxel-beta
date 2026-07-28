@@ -684,36 +684,7 @@ const naze = async (naze, m, msg, store) => {
 				delete ulartangga[m.chat]
 				return m.reply(`🐍🪜Waktu Habis!\nPermainan dihentikan`)
 			}
-		}
-		
-		// Menfes & Room Ai
-		if (!m.isGroup && (!isCmd || isCreator)) {
-			if (menfes[m.sender] && m.key.remoteJid !== 'status@broadcast' && m.msg) {
-				m.react('✈');
-				if (m.type !== 'conversation') m.msg.contextInfo = { isForwarded: true, forwardingScore: 1, quotedMessage: { conversation: `*Pesan Dari ${menfes[m.sender].nama ? menfes[m.sender].nama : 'Seseorang'}*`}, key: { remoteJid: '0@s.whatsapp.net', fromMe: false, participant: '0@s.whatsapp.net' }}
-				const pesan = m.type === 'conversation' ? { extendedTextMessage: { text: m.msg, contextInfo: { isForwarded: true, forwardingScore: 1, quotedMessage: { conversation: `*Pesan Dari ${menfes[m.sender].nama ? menfes[m.sender].nama : 'Seseorang'}*`}, key: { remoteJid: '0@s.whatsapp.net', fromMe: false, participant: '0@s.whatsapp.net' }}}} : { [m.type]: m.msg }
-				await naze.relayMessage(menfes[m.sender].tujuan, pesan, {});
-			}
-			if (chat_ai[m.sender] && m.key.remoteJid !== 'status@broadcast') {
-				if (!/^(del((room|c|hat)ai)|>|<$)$/i.test(command) && budy) {
-					chat_ai[m.sender].push({ role: 'user', content: budy });
-					if (chat_ai[m.sender].length > 20) chat_ai[m.sender].shift();
-					let hasil;
-					try {
-						hasil = await fetchApi('/ai/chat4', {
-							messages: chat_ai[m.sender],
-							prompt: budy
-						}, { method: 'POST' });
-					} catch (e) {
-						hasil = 'Gagal Mengambil Respon, Website sedang gangguan'
-					}
-					const response = hasil?.result?.message || 'Maaf, saya tidak mengerti.';
-					chat_ai[m.sender].push({ role: 'assistant', content: response });
-					if (chat_ai[m.sender].length > 20) chat_ai[m.sender].shift();
-					await m.reply(response)
-				}
-			}
-		}
+		}	
 		
 		// Afk
 		let mentionUser = [...new Set([...(m.mentionedJid || []), ...(m.quoted ? [m.quoted.sender] : [])])]
@@ -4386,16 +4357,6 @@ Select Bot Settings:
 │${setv} ${prefix}earrape (reply audio)
 │${setv} ${prefix}nightcore (reply audio)
 │${setv} ${prefix}getexif (reply sticker)
-╰─┬────❍
-╭─┴❍「 *AI* 」❍
-│${setv} ${prefix}ai (query)
-│${setv} ${prefix}gemini (query)
-│${setv} ${prefix}glm (query)
-│${setv} ${prefix}grok (query)
-│${setv} ${prefix}claude (query)
-│${setv} ${prefix}archipelago (query)
-│${setv} ${prefix}deepseek (query)
-│${setv} ${prefix}txt2img (query)
 ╰─┬────❍
 ╭─┴❍「 *ANIME* 」❍
 │${setv} ${prefix}waifu

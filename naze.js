@@ -76,7 +76,6 @@ const naze = async (naze, m, msg, store) => {
 	// Database Game
 	let suit = db.game.suit
 	let chess = db.game.chess
-	let chat_ai = db.game.chat_ai
 	let menfes = db.game.menfes
 	let tekateki = db.game.tekateki
 	let tictactoe = db.game.tictactoe
@@ -2951,66 +2950,6 @@ Select Bot Settings:
 					setLimit(m, db)
 				} catch (e) {
 					m.reply(global.mess.fail)
-				}
-			}
-			break
-			
-			// Ai Menu
-			case 'ai': case 'google': case 'bard': case 'gemini': {
-				if (!text) return m.reply(`Example: ${prefix + command} query`)
-				try {
-					let hasil = await fetchApi('/ai/gemini-flash-lite', { query: text });
-					m.reply(hasil.result.text)
-				} catch (e) {
-					m.reply(pickRandom(['Fitur Ai sedang bermasalah!','Tidak dapat terhubung ke ai!','Sistem Ai sedang sibuk sekarang!','Fitur sedang tidak dapat digunakan!']))
-				}
-			}
-			break
-			case 'archipelago': case 'grok': case 'glm': case 'claude': {
-				if (global.APIKeys[global.APIs.neosantara] === 'API_KEY_NEOSANTARA_AI') return m.reply('Silahkan Ganti Apikey Neosantara Ai!\nDi file settings.js. Example: .setapikey neo key_nya');
-				if (!text) return m.reply('Halo! Ada yang bisa dibantu hari ini?')
-				try {
-					let model;
-					if (command == 'glm') model = 'glm-4.7-flash'
-					if (command == 'claude') model = 'claude-3-haiku'
-					if (command == 'archipelago') model = 'archipelago-70b'
-					if (command == 'grok') model = 'grok-4.1-fast-non-reasoning'
-					
-					const response = await fetchApi('/chat/completions', {
-						model, messages: [{ role: 'user', content: text }]
-					}, {
-						api: 2, method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${global.APIKeys[global.APIs.neosantara]}`
-						}
-					});
-					await m.reply(response.choices[0].message.content);
-				} catch (e) {
-					m.reply('Waduh, ada kendala pas nanya ke Neosantara nih.');
-				}
-			}
-			break
-			case 'deepseek': case 'r1': {
-				if (global.APIKeys[global.APIs.neosantara] === 'API_KEY_NEOSANTARA_AI') return m.reply('Silahkan Ganti Apikey Neosantara Ai!\nDi file settings.js. Example: .setapikey neo key_nya');
-				if (!text) return m.reply('Halo! Ada yang bisa dibantu hari ini?');
-				m.reply('Tunggu bentar, lagi mikir... 🧠');
-				try {
-					const response = await fetchApi('/chat/completions', {
-						model: 'deepseek-r1',
-						messages: [{ role: 'user', content: text }],
-						thinking: { type: 'enabled', budget_tokens: 2048 }
-					}, {
-						api: 2, method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${global.APIKeys[global.APIs.neosantara]}`
-						}
-					});
-					const result = response.choices[0].message;
-					const thought = result.reasoning_content ? `*Proses Mikir:*\n_${result.reasoning_content}_` : '';
-					await m.reply(thought + result.content);
-				} catch (e) {
-					console.log(e);
-					m.reply('Waduh, ada kendala pas nanya ke Neosantara nih.');
 				}
 			}
 			break

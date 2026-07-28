@@ -4,11 +4,11 @@ WhatsApp Bot berbasis Node.js yang dikembangkan dengan fokus pada performa ringa
 
 ---
 
-### ✨ Fitur Utama
+#### ✨ Fitur Utama
 
 Voxel-Beta mempertahankan fitur inti dari basis kode aslinya, namun dengan pendekatan yang lebih minimalis dan optimal.
 
-### ❌ Fitur yang dihapus
+#### ❌ Fitur yang dihapus
 
 - ❌ AI
 - ❌ Jadibot
@@ -33,9 +33,9 @@ Fitur lainnya tetap aktif, stabil, dan dapat digunakan seperti biasa tanpa perub
 
 ---
 
-### 📦 Instalasi
+##### 📦 Instalasi
 
-##### 🔧 Requirement
+### 🔧 Requirement
 
 Pastikan sudah terpasang:
 
@@ -81,16 +81,18 @@ Jika terjadi error saat instalasi di Termux Native, gunakan:
 
 ---
 
-##### 🐧 PRoot-Distro (Termux)
+### 🐧 PRoot-Distro (Termux)
 
 Jika menggunakan Termux, disarankan menjalankan bot melalui PRoot-Distro untuk stabilitas penuh.
 
 📌 Rekomendasi distro:
 
-Distro| Keterangan
-Arch Linux| ⭐ REKOMENDASI UTAMA (package terbaru & stabil untuk dev)
-Debian| Stabil, namun mungkin perlu NVM untuk Node.js terbaru
-Ubuntu| Alternatif Debian dengan kompatibilitas luas
+Distro | Keterangan
+## Arch Linux| ⭐ REKOMENDASI UTAMA (package terbaru & stabil untuk dev)
+
+## Debian | Stabil, namun mungkin perlu NVM untuk Node.js terbaru
+
+## Ubuntu | Alternatif Debian dengan kompatibilitas luas
 
 ---
 

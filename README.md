@@ -1,62 +1,108 @@
-Voxel-Beta
+### Voxel-Beta
 
-WhatsApp Bot berbasis Node.js yang dikembangkan untuk penggunaan yang lebih ringan dan efisien.
+WhatsApp Bot berbasis Node.js yang dikembangkan dengan fokus pada performa ringan, efisiensi tinggi, dan kemudahan pengembangan.
 
-✨ Fitur
+---
 
-Voxel-Beta mempertahankan sebagian besar fitur utama dari basis kode aslinya, dengan beberapa fitur yang sengaja dipangkas:
+### ✨ Fitur Utama
+
+Voxel-Beta mempertahankan fitur inti dari basis kode aslinya, namun dengan pendekatan yang lebih minimalis dan optimal.
+
+### ❌ Fitur yang dihapus
 
 - ❌ AI
 - ❌ Jadibot
 
-Kedua fitur tersebut dihapus untuk meningkatkan efisiensi serta mengurangi kemungkinan konflik ketika menambahkan patch atau pengembangan baru.
+Penghapusan fitur ini dilakukan untuk:
 
-Dengan dipangkasnya fitur tersebut, penggunaan RAM bot diperkirakan sekitar 60–100 MB, tergantung penggunaan dan fitur yang aktif.
+- Meningkatkan efisiensi performa
+- Mengurangi penggunaan RAM
+- Meminimalkan konflik saat pengembangan atau patch baru
 
-Fitur lainnya tetap tersedia dan dapat digunakan secara normal.
+### 📊 Performa
 
-📦 Instalasi
+Dengan optimasi ini, penggunaan RAM bot berada di kisaran:
+
+- ± 60–100 MB
+
+«Nilai ini dapat berubah tergantung fitur yang aktif dan beban penggunaan.»
+
+### ✅ Fitur lain
+
+Fitur lainnya tetap aktif, stabil, dan dapat digunakan seperti biasa tanpa perubahan signifikan.
+
+---
+
+### 📦 Instalasi
+
+##### 🔧 Requirement
 
 Pastikan sudah terpasang:
 
-- Node.js
-- npm atau Yarn
+- Node.js (disarankan v20+)
+- npm atau Yarn (disarankan Yarn)
 - Python 3
 - Git
 
-Clone repository:
+---
+
+#### 📥 Clone Repository
 
 git clone https://github.com/Sahur01-arch/Voxel-beta.git
 cd Voxel-beta
 
-Install dependency menggunakan Yarn:
+---
+
+#### 📦 Install Dependency
+
+### ✅ Menggunakan Yarn (REKOMENDASI)
 
 yarn install
 
-Atau menggunakan npm:
+atau npm
 
 npm install
 
-«Disarankan menggunakan Yarn.»
+«⚠️ Disarankan menggunakan Yarn untuk stabilitas dependency yang lebih baik.»
 
-Pastikan Python 3 sudah terpasang terlebih dahulu karena beberapa dependency dapat membutuhkannya saat proses instalasi.
+---
 
-Jika instalasi dependency mengalami error ketika menggunakan Termux Native, disarankan menjalankannya melalui PRoot-Distro.
+### 🐍 Catatan Python
 
-🐧 PRoot-Distro
+Pastikan Python 3 sudah terinstall, karena beberapa dependency membutuhkan proses build native.
 
-Jika menggunakan Termux, kamu dapat menjalankan Voxel-Beta melalui PRoot-Distro.
+---
 
-Rekomendasi distro:
+### ⚠️ Termux Issue
+
+Jika terjadi error saat instalasi di Termux Native, gunakan:
+
+- PRoot-Distro (REKOMENDASI)
+
+---
+
+##### 🐧 PRoot-Distro (Termux)
+
+Jika menggunakan Termux, disarankan menjalankan bot melalui PRoot-Distro untuk stabilitas penuh.
+
+📌 Rekomendasi distro:
 
 Distro| Keterangan
-Arch Linux| ⭐ Rekomendasi. Package cenderung lebih baru
-Debian| Stabil, tetapi gunakan NVM jika versi Node.js tersedia terlalu lama
-Ubuntu| Alternatif yang mirip dengan Debian
+Arch Linux| ⭐ REKOMENDASI UTAMA (package terbaru & stabil untuk dev)
+Debian| Stabil, namun mungkin perlu NVM untuk Node.js terbaru
+Ubuntu| Alternatif Debian dengan kompatibilitas luas
 
-Untuk Debian atau Ubuntu, jika Node.js yang tersedia masih di bawah versi 20, gunakan NVM untuk memasang versi Node.js yang lebih baru.
+---
 
-⚙️ Konfigurasi
+#### ⚙️ Catatan Node.js
+
+Jika versi Node.js di distro masih di bawah v20, gunakan:
+
+- NVM (Node Version Manager)
+
+---
+
+#### ⚙️ Konfigurasi
 
 Sebelum menjalankan bot, ubah file:
 
@@ -66,117 +112,150 @@ menjadi:
 
 settings.js
 
-Kemudian buka:
+---
+
+#### ✏️ Edit konfigurasi
 
 nano settings.js
 
-atau gunakan text editor pilihanmu.
+atau gunakan editor lain sesuai preferensi.
 
-Masukkan konfigurasi dan API Key yang diperlukan pada file "settings.js". Informasi mengenai API yang digunakan dan konfigurasi yang tersedia dapat dilihat langsung di dalam file tersebut.
+---
 
-Pastikan konfigurasi owner, nomor bot, API Key, dan pengaturan lainnya sudah benar sebelum menjalankan bot.
+#### 🔑 Penting
 
-▶️ Menjalankan Bot
+Isi konfigurasi berikut dengan benar:
 
-Setelah konfigurasi selesai, jalankan:
+- Owner number
+- Bot number
+- API Key
+- Database config
+- Setting fitur lainnya
+
+«Semua detail konfigurasi sudah dijelaskan langsung di dalam file "settings.js".»
+
+⚠️ **Jangan membagikan file **"settings.js" karena berisi data sensitif.
+
+---
+
+### ▶️ Menjalankan Bot
+
+### 🚀 Start manual
 
 node index.js
 
-Atau gunakan:
+atau
 
 node start.js
 
-Untuk menjalankan bot secara terus-menerus, PM2 sangat disarankan.
+---
 
-Contoh:
+#### 🔁 Rekomendasi: PM2 (Production)
+
+Untuk menjaga bot tetap hidup 24/7:
 
 npm install -g pm2
 pm2 start index.js --name voxel-beta
 pm2 save
 
-Melihat log:
+---
+
+#### 📊 Monitoring
 
 pm2 logs voxel-beta
 
-Restart:
+---
+
+#### 🔄 Restart Bot
 
 pm2 restart voxel-beta
 
-🗄️ Database
+---
 
-Voxel-Beta mendukung penyimpanan database menggunakan:
+#### 🗄️ Database
 
-- JSON Database — penyimpanan lokal
-- MongoDB — penyimpanan menggunakan MongoDB
+Voxel-Beta mendukung dua jenis database:
 
-Konfigurasi database dapat disesuaikan melalui "settings.js".
-
-🌐 Self-Hosting File / Image
-
-Jika kamu tidak ingin menggunakan layanan hosting eksternal untuk menyimpan image atau file, kamu dapat membuat server sendiri menggunakan Express.js.
-
-Voxel-Beta memiliki struktur server yang dapat digunakan sebagai dasar untuk kebutuhan tersebut.
-
-Namun, konfigurasi dan setup self-hosting harus dilakukan sendiri sesuai kebutuhan, termasuk:
-
-- Routing
-- Penyimpanan file
-- Upload file
-- Akses publik
-- Domain atau IP
-- HTTPS jika diperlukan
-
-📁 Struktur Utama
-
-Voxel-Beta/
-├── lib/
-│   ├── converter.js
-│   ├── exif.js
-│   ├── function.js
-│   ├── game.js
-│   ├── math.js
-│   ├── scraper.js
-│   ├── template_menu.js
-│   └── tictactoe.js
-├── src/
-│   ├── media/
-│   ├── nulis/
-│   ├── antispam.js
-│   ├── database.js
-│   ├── message.js
-│   └── server.js
-├── index.js
-├── naze.js
-├── start.js
-├── settings-example.js
-├── package.json
-└── speed.py
-
-⚠️ Catatan
-
-- Gunakan Node.js versi 20 atau lebih baru jika dependency membutuhkan versi tersebut.
-- Jika menggunakan Termux dan instalasi native mengalami masalah, gunakan PRoot-Distro.
-- Gunakan Yarn sebagai package manager yang direkomendasikan.
-- Pastikan Python 3 tersedia sebelum menjalankan instalasi dependency.
-- Jangan membagikan "settings.js" karena dapat berisi API Key dan konfigurasi sensitif.
-- Untuk deployment jangka panjang, gunakan PM2 agar bot dapat berjalan di background dan otomatis di-restart.
-
-👤 Author
-
-Saryu
-
-🔗 Credits
-
-Forked from Nazedev/hitori
-
-Git Fork:
-
-https://github.com/nazedev/hitori
-
-Original project:
-
-https://github.com/nazedev/hitori
+- JSON Database → ringan & lokal
+- MongoDB → scalable & cloud-ready
 
 ---
 
-«Voxel-Beta dikembangkan dengan fokus pada efisiensi, stabilitas, dan kemudahan pengembangan lebih lanjut.»
+#### ⚙️ Konfigurasi
+
+Semua pengaturan database dapat diatur melalui:
+
+settings.js
+
+---
+
+#### 🌐 Self-Hosting File / Image
+
+Voxel-Beta mendukung opsi self-hosting server file/image menggunakan Express.js.
+
+#### 📌 Yang bisa dikembangkan:
+
+- Routing API
+- Upload file
+- File storage lokal
+- Public access endpoint
+- Domain / IP binding
+- HTTPS support
+
+«⚠️ Implementasi self-hosting sepenuhnya diserahkan kepada user sesuai kebutuhan masing-masing.»
+
+---
+
+#### 📁 Struktur Project
+
+Voxel-Beta/
+├── lib/                 # Utility & helper functions
+├── src/                 # Core system bot
+├── index.js            # Entry utama bot
+├── naze.js             # Core handler
+├── start.js            # Alternative start file
+├── settings-example.js # Template config
+├── package.json        # Dependency manager
+└── speed.py            # Utility script
+
+---
+
+#### ⚠️ Catatan Penting
+
+- Gunakan Node.js v20+ (REKOMENDASI)
+- Gunakan Yarn untuk stabilitas dependency
+- Gunakan PRoot-Distro jika di Termux
+- Pastikan Python 3 sudah terinstall
+- Jangan expose "settings.js"
+- Gunakan PM2 untuk production deployment
+
+---
+
+### 👤 Author
+
+Saryu
+
+---
+
+#### 🔗 Credits
+
+Forked from:
+
+- Nazedev / hitori
+
+GitHub:
+
+- "https://github.com/nazedev/hitori" (https://github.com/nazedev/hitori)
+
+---
+
+#### 🚀 Kesimpulan
+
+Voxel-Beta dirancang untuk menjadi:
+
+- Ringan
+- Stabil
+- Mudah dikembangkan
+- Siap production
+
+«Fokus utama: efisiensi, performa, dan fleksibilitas pengembangan jangka panjang.»

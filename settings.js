@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 //~~~~~~~~~~~~< GLOBAL SETTINGS >~~~~~~~~~~~~\\
 
-global.owner = ["6285178189217"] // ['628','628'] 2 owner atau lebih
+global.owner = ["62xxxxxxx"] // ['628','628'] 2 owner atau lebih
 global.author = 'Saryu'
 global.botname = 'Voxel Bot'
 global.packname = 'Voxel-Beta'

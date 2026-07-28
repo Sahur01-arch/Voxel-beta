@@ -6,17 +6,18 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 
 /*
-	* Create By Naze
+	* Create By Naze Fork By Saryu
 	* Follow https://github.com/nazedev
+  * Fork : https://github.com/Sahur01-arch/Voxel-beta
 	* Whatsapp : https://whatsapp.com/channel/0029VaWOkNm7DAWtkvkJBK43
 */
 
 //~~~~~~~~~~~~< GLOBAL SETTINGS >~~~~~~~~~~~~\\
 
-global.owner = ["6282113821188"] // ['628','628'] 2 owner atau lebih
-global.author = 'Nazedev'
-global.botname = 'Hitori Bot'
-global.packname = 'Bot WhatsApp'
+global.owner = ["6285178189217"] // ['628','628'] 2 owner atau lebih
+global.author = 'Saryu'
+global.botname = 'Voxel Bot'
+global.packname = 'Voxel-Beta'
 global.timezone = 'Asia/Jakarta' // Ganti pakai command .settimezone
 global.locale = 'en' // Ganti pakai command .setlocale
 global.listprefix = ["+","!","."]
@@ -30,17 +31,17 @@ global.number_bot = '' // Kalo pake panel bisa masukin nomer di sini, jika belum
 
 global.fake = {
 	anonim: 'https://telegra.ph/file/95670d63378f7f4210f03.png',
-	thumbnailUrl: 'https://telegra.ph/file/fe4843a1261fc414542c4.jpg',
-	thumbnail: fs.readFileSync('./src/media/naze.png'),
+	thumbnailUrl: 'https://files.catbox.moe/zsq4jp.jpg',
+	thumbnail: fs.readFileSync('./src/media/me.jpg'),
 	docs: fs.readFileSync('./src/media/fake.pdf'),
 	listfakedocs: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.openxmlformats-officedocument.presentationml.presentation','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/pdf'],
 }
 
 global.my = {
-	yt: "https://youtube.com/c/Nazedev",
-	gh: "https://github.com/nazedev",
-	gc: "https://chat.whatsapp.com/EqMTCcxdCZgHUJNl5KooCr",
-	ch: "120363250409960161@newsletter"
+	yt: "https://youtube.com/@sahur01-hyc",
+	gh: "https://github.com/Sahur01-arch",
+	gc: "",
+	ch: ""
 }
 
 global.limit = {
@@ -79,7 +80,7 @@ global.APIs = {
 	neosantara: 'https://api.neosantara.xyz/v1',
 }
 global.APIKeys = {
-	'https://api.naze.biz.id': 'nz-298327ff62',
+	'https://api.naze.biz.id': 'nz-a1e6375978',
 	'https://api.neosantara.xyz/v1': 'API_KEY_NEOSANTARA_AI',
 }
 

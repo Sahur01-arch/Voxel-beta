@@ -1,22 +1,22 @@
 {
-  "name": "hitori",
+  "name": "Voxel-Beta",
   "version": "1.1.9",
-  "description": "Bot WhatsApp Using Lib Baileys Multi Device",
+  "description": "WhatsApp Bot Forked From Hitori Nazedev",
   "keywords": [
     "whatsapp-bot",
     "baileys-md",
     "bot-wa",
     "multi-device"
   ],
-  "author": "Nazedev",
+  "author": "Saryu",
   "license": "MIT",
-  "homepage": "https://github.com/nazedev/hitori#readme",
+  "homepage": "https://github.com/Sahur01-arch/Voxel-beta/#readme",
   "bugs": {
-    "url": "https://github.com/nazedev/hitori/issues"
+    "url": "https://github.com/Sahur01-arch/Voxel-beta/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nazedev/hitori.git"
+    "url": "git+https://github.com/Sahur01-arch/Voxel-beta.git"
   },
   "type": "module",
   "main": "start.js",

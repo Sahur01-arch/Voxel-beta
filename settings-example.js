@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 global.owner = ["62xxxxx"] // ['628','628'] 2 owner atau lebih
 global.author = 'Saryu'
-global.botname = 'Voxel Bot'
+global.botname = 'Voxel-Beta'
 global.packname = 'Voxel-Beta'
 global.timezone = 'Asia/Jakarta' // Ganti pakai command .settimezone
 global.locale = 'en' // Ganti pakai command .setlocale

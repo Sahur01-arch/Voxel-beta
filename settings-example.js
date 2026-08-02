@@ -27,7 +27,7 @@ global.listv = ['•','●','■','✿','▲','➩','➢','➣','➤','✦','✧
 global.tempatDB = 'database.json' // Taruh url mongodb di sini jika menggunakan mongodb. Format : 'mongodb+srv://...'
 global.tempatStore = 'baileys_store.json' // Taruh url mongodb di sini jika menggunakan mongodb. Format : 'mongodb+srv://...'
 global.pairing_code = true
-global.number_bot = '' // Kalo pake panel bisa masukin nomer di sini, jika belum ambil session. Format : '628xx'
+global.number_bot = '6285178189217' // Kalo pake panel bisa masukin nomer di sini, jika belum ambil session. Format : '628xx'
 
 global.fake = {
 	anonim: 'https://telegra.ph/file/95670d63378f7f4210f03.png',
@@ -99,3 +99,15 @@ global.chatLength = 1000
 fs.watchFile(__filename, async () => {
 	console.log(chalk.yellowBright(`[UPDATE] ${__filename}`))
 });
+
+global.rconAccess = [
+  '62xxxxxx@s.whatsapp.net'
+  // tambah nomor disini
+]
+
+global.rconConfig = {
+    host: 'You Host',
+    port: 2025,
+    password: 'your password'
+}
+}

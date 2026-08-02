@@ -4779,12 +4779,44 @@ Select Bot Settings:
 │${setv} ${prefix}delsampah
 │${setv} ${prefix}upsw
 │${setv} ${prefix}backup
+│${setv} ${prefix}rcon
 │${setv} $
 │${setv} >
 │${setv} <
 ╰──────❍`)
 			}
 			break
+
+      case 'rcon': {
+        const senderJid = m.chat.endsWith('@g.us') ? m.sender : m.chat
+
+        if (!global.rconAccess.includes(senderJid)) {
+          return m.reply('🔒 Nomor kamu tidak terdaftar untuk akses RCON')
+        }
+
+        if (args.length === 0) {
+          return m.reply('Format: .rcon <command>\nContoh: .rcon list')
+        }
+
+        const { Rcon } = require('rcon-client')
+        const rconCommand = args.join(' ')
+
+        try {
+          const rcon = await Rcon.connect({
+            host: rconConfig.host,
+            port: rconConfig.port,
+            password: rconConfig.password
+          })
+          const response = await rcon.send(rconCommand)
+          await rcon.end()
+          m.reply(`*RCON RESPONSE:*\n\`\`\`${response || '(kosong)'}\`\`\``)
+        } catch (err) {
+          let errMsg = err.message
+          if (err.code === 'ECONNREFUSED') errMsg = 'Server sedang offline atau masih restart.'
+          m.reply(`❌ RCON error: ${errMsg}`)
+        }
+      }
+      break
 
 			default:
 			if (budy.startsWith('>')) {

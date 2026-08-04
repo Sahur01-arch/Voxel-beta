@@ -3309,7 +3309,7 @@ Select Bot Settings:
 			case 'waifu': case 'neko': {
 				try {
 					if (!isNsfw && text === 'nsfw') return m.reply('Filter Nsfw Sedang Aktif!')
-					const res = await fetchJson('https://api.waifu.pics/' + (text === 'nsfw' ? 'nsfw' : 'sfw') + '/' + command)
+					const res = await fetchJson('https://api.waifu.im/' + (text === 'nsfw' ? 'nsfw' : 'sfw') + '/' + command)
 					await naze.sendFileUrl(m.chat, res.url, 'Random Waifu', m)
 					setLimit(m, db)
 				} catch (e) {

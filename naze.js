@@ -119,11 +119,14 @@ const naze = async (naze, m, msg, store) => {
 			if (!findJid) return false
 			return findJid === m.sender
 		});
-		const symbolMatch = body.match(/^[°•π÷×¶∆£¢€¥®™+✓_=|~!?@()#,'"*+÷/\%^&.©^]/gi);
-		const emojiMatch = body.match(/^[\uD800-\uDBFF][\uDC00-\uDFFF]/gi); 
+		const symbolMatch = set.multiprefix ? body.match(/^[°•π÷×¶∆£¢€¥®™+✓_=|~!?@()#,'"*+÷/\%^&.©^]/gi) : null;
+		const emojiMatch = set.multiprefix ? body.match(/^[\uD800-\uDBFF][\uDC00-\uDFFF]/gi) : null;
 		const listMatch = global.listprefix.find(a => body?.startsWith(a));
 		const detectedPrefix = symbolMatch ? symbolMatch[0] : (emojiMatch ? emojiMatch[0] : listMatch);
-		const prefix = isCreator ? (detectedPrefix || set.authorPrefix) : set.multiprefix ? (detectedPrefix || '¿') : (listMatch || '¿');
+		// authorPrefix null/undefined = belum pernah di-set owner -> ikuti aturan prefix normal (fix: dulu default '' bikin isCmd selalu true untuk owner walau tanpa prefix apapun)
+		const hasAuthorOverride = set.authorPrefix !== null && set.authorPrefix !== undefined;
+		const normalPrefix = set.multiprefix ? (detectedPrefix || '¿') : (listMatch || '¿');
+		const prefix = isCreator ? (hasAuthorOverride ? (detectedPrefix || set.authorPrefix) : normalPrefix) : normalPrefix;
 		const isCmd = body.startsWith(prefix)
 		const args = body.trim().split(/ +/).slice(1)
 		const quoted = m.quoted ? m.quoted : m

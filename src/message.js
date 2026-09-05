@@ -221,7 +221,9 @@ async function LoadDataBase(naze, m) {
 			whitelistonly: false,
 			didyoumean: false,
 			author: global.author || 'Nazedev',
-			authorPrefix: '',
+			// null = belum diatur owner, wajib pakai prefix normal seperti user lain.
+			// Owner bisa jalankan `authorprefix off` bila memang ingin bypass prefix secara sengaja.
+			authorPrefix: null,
 			autobackup: false,
 			botname: global.botname || 'Hitori Bot',
 			packname: global.packname || 'Bot WhatsApp',
@@ -232,6 +234,10 @@ async function LoadDataBase(naze, m) {
 		for (let key in defaultSetBot) {
 			if (!(key in setBot)) setBot[key] = defaultSetBot[key];
 		}
+		// Migrasi bug lama: authorPrefix pernah default '' sehingga owner bisa jalankan
+		// command apapun tanpa prefix sama sekali. Reset ke null (ikut aturan prefix normal).
+		// Owner yang memang sengaja mau tanpa-prefix cukup jalankan `authorprefix off` lagi.
+		if (setBot.authorPrefix === '') setBot.authorPrefix = null;
 		
 		const limitUser = user.vip ? global.limit.vip : checkStatus(m.sender, premium) ? global.limit.premium : global.limit.free;
 		const moneyUser = user.vip ? global.money.vip : checkStatus(m.sender, premium) ? global.money.premium : global.money.free;

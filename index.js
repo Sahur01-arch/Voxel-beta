@@ -36,6 +36,32 @@ const time_end = 60000 - (time_now.getSeconds() * 1000 + time_now.getMillisecond
 let pairingStarted = false;
 let setupServer = null;
 let phoneNumber;
+let pairingAttempts = 0;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+const maxPairingAttempts = 5;
+const maxReconnectAttempts = 10;
+
+// Reconnect terkontrol (bukan langsung panggil ulang) supaya kalau koneksi
+// gagal berkali-kali (mis. internet putus / WA lagi bermasalah) tidak jadi
+// reconnect-storm yang diam-diam nge-spam server WhatsApp tanpa pernah kelihatan errornya.
+function scheduleReconnect(reason) {
+	if (reconnectTimer) return;
+	reconnectAttempts++;
+	if (reconnectAttempts > maxReconnectAttempts) {
+		console.log(chalk.redBright(`[FATAL] Gagal reconnect (${reason}) setelah ${maxReconnectAttempts}x percobaan. Bot dihentikan, cek koneksi internet / status WhatsApp lalu jalankan ulang.`));
+		process.exit(1);
+	}
+	const delay = Math.min(3000 * reconnectAttempts, 30000);
+	console.log(chalk.yellow(`[RECONNECT] Alasan: ${reason}. Percobaan ke-${reconnectAttempts}/${maxReconnectAttempts}, mencoba lagi dalam ${(delay / 1000).toFixed(1)} detik...`));
+	reconnectTimer = setTimeout(() => {
+		reconnectTimer = null;
+		startNazeBot().catch((e) => {
+			console.log(chalk.redBright('[FATAL] Reconnect gagal dijalankan:'), e)
+			scheduleReconnect('reconnect-error')
+		});
+	}, delay);
+}
 
 const userInfoSyt = () => {
 	try {
@@ -195,8 +221,16 @@ async function startNazeBot() {
 		process.exit(1)
 	}
 	
-	const level = pino({ level: 'silent' });
-	const { version } = await fetchLatestWaWebVersion();
+	// Level logger baileys bisa dinaikkan lewat env DEBUG_BAILEYS=1 supaya error/warning
+	// koneksi (pairing gagal, dsb) kelihatan, bukan "silent" sepenuhnya.
+	const level = pino({ level: process.env.DEBUG_BAILEYS ? 'debug' : 'silent' });
+	let version;
+	try {
+		({ version } = await fetchLatestWaWebVersion());
+	} catch (e) {
+		console.log(chalk.redBright('[ERROR] Gagal mengambil versi WA Web terbaru, memakai fallback bawaan Baileys:'), e.message);
+		version = undefined;
+	}
 	if (pairingCode && !phoneNumber && !fs.existsSync('./nazedev/creds.json')) {
 		fs.rmSync('./nazedev', { recursive: true, force: true });
 		async function getPhoneNumber() {
@@ -261,31 +295,49 @@ async function startNazeBot() {
 				try {
 					console.log('Requesting Pairing Code...')
 					let code = await naze.requestPairingCode(phoneNumber);
+					if (!code) throw new Error('Server tidak mengembalikan pairing code (kemungkinan nomor invalid atau diblokir sementara oleh WhatsApp).');
+					pairingAttempts = 0;
 					console.log(chalk.blue('Your Pairing Code :'), chalk.green(code), '\n', chalk.yellow('Expires in 15 second'));
 				} catch (err) {
-					console.log(chalk.redBright('[ERROR] Failed to retrieve the Pairing Code:'), err.message);
+					pairingAttempts++;
+					console.log(chalk.redBright(`[ERROR] Gagal mendapatkan Pairing Code (percobaan ${pairingAttempts}/${maxPairingAttempts}):`), err.message);
 					pairingStarted = false;
+					if (pairingAttempts >= maxPairingAttempts) {
+						console.log(chalk.redBright('[FATAL] Pairing gagal terus setelah beberapa kali percobaan.'));
+						console.log(chalk.redBright('Kemungkinan penyebab: nomor WhatsApp salah/format tidak valid, nomor sedang dibatasi (rate-limited) oleh WhatsApp, atau koneksi internet server tidak stabil.'));
+						fs.rmSync('./nazedev', { recursive: true, force: true });
+						process.exit(1);
+					}
 				}
 			}, 3000)
 		}
 		if (connection === 'close') {
 			pairingStarted = false;
-			const reason = new Boom(lastDisconnect?.error)?.output.statusCode
+			const boomError = new Boom(lastDisconnect?.error)
+			const reason = boomError?.output?.statusCode
+			// Log pesan asli errornya juga, jangan cuma nama reason -- ini yang sebelumnya
+			// "silent" karena logger baileys di-set 'silent' dan tidak ada detail yang tampil.
+			console.log(chalk.gray(`[DISCONNECT] statusCode=${reason} message=${boomError?.message || lastDisconnect?.error?.message || 'unknown'}`));
 			if (reason === DisconnectReason.connectionLost) {
 				console.log('Connection to Server Lost, Attempting to Reconnect...');
-				startNazeBot()
+				scheduleReconnect('connectionLost')
 			} else if (reason === DisconnectReason.connectionClosed) {
 				console.log('Connection closed, Attempting to Reconnect...');
-				startNazeBot()
+				scheduleReconnect('connectionClosed')
 			} else if (reason === DisconnectReason.restartRequired) {
 				console.log('Restart Required...');
-				startNazeBot()
+				reconnectAttempts = 0; // restartRequired itu normal (biasanya setelah pairing sukses), bukan tanda kegagalan
+				startNazeBot().catch((e) => {
+					console.log(chalk.redBright('[FATAL] Restart gagal dijalankan:'), e)
+					scheduleReconnect('restart-error')
+				})
 			} else if (reason === DisconnectReason.timedOut) {
 				console.log('Connection Timed Out, Attempting to Reconnect...');
-				startNazeBot()
+				scheduleReconnect('timedOut')
 			} else if (reason === DisconnectReason.badSession) {
-				console.log('Delete Session and Scan again...');
-				startNazeBot()
+				console.log(chalk.redBright('Bad Session terdeteksi, menghapus sesi lama dan mencoba ulang...'));
+				fs.rmSync('./nazedev', { recursive: true, force: true });
+				scheduleReconnect('badSession')
 			} else if (reason === DisconnectReason.connectionReplaced) {
 				console.log('Close current Session first...');
 			} else if (reason === DisconnectReason.loggedOut) {
@@ -301,10 +353,13 @@ async function startNazeBot() {
 				fs.rmSync('./nazedev', { recursive: true, force: true });
 				process.exit(0)
 			} else {
-				naze.end(`Unknown DisconnectReason : ${reason}|${connection}`)
+				console.log(chalk.redBright(`[UNKNOWN DISCONNECT] reason=${reason}. Mencoba reconnect dengan backoff...`));
+				scheduleReconnect(`unknown:${reason}`)
 			}
 		}
 		if (connection == 'open') {
+			reconnectAttempts = 0;
+			pairingAttempts = 0;
 			console.log('Connected to : ' + JSON.stringify(naze.user, null, 2));
 			let botNumber = await naze.decodeJid(naze.user.id);
 			if (global.db?.set[botNumber] && !global.db?.set[botNumber]?.join) {
@@ -428,7 +483,10 @@ async function startNazeBot() {
 	return naze
 }
 
-startNazeBot()
+startNazeBot().catch((e) => {
+	console.log(chalk.redBright('[FATAL] startNazeBot() gagal dijalankan:'), e)
+	scheduleReconnect('startup-error')
+})
 
 const cleanup = async (signal) => {
 	console.log(chalk.greenBright(`[SYSTEM] Received ${signal}. Menyimpan database...`));

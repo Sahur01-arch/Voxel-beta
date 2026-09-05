@@ -14,12 +14,12 @@ const __filename = fileURLToPath(import.meta.url);
 
 //~~~~~~~~~~~~< GLOBAL SETTINGS >~~~~~~~~~~~~\\
 
-global.owner = ["62xxxxx"] // ['628','628'] 2 owner atau lebih
+global.owner = ["6285178189217"] // ['628','628'] 2 owner atau lebih
 global.author = 'Saryu'
 global.botname = 'Voxel-Beta'
 global.packname = 'Voxel-Beta'
 global.timezone = 'Asia/Jakarta' // Ganti pakai command .settimezone
-global.locale = 'en' // Ganti pakai command .setlocale
+global.locale = 'id' // Ganti pakai command .setlocale
 global.listprefix = ["+","!","."]
 global.defaultAdminKey = crypto.randomBytes(5).toString("hex");
 
@@ -77,11 +77,9 @@ global.mess = {
 
 global.APIs = {
 	naze: 'https://api.naze.biz.id',
-	neosantara: 'https://api.neosantara.xyz/v1',
 }
 global.APIKeys = {
-	'https://api.naze.biz.id': '',
-	'https://api.neosantara.xyz/v1': 'API_KEY_NEOSANTARA_AI',
+	'https://api.naze.biz.id': 'nz-c3efe8a1e4',
 }
 
 // Lainnya
@@ -109,5 +107,4 @@ global.rconConfig = {
     host: 'You Host',
     port: 2025,
     password: 'your password'
-}
 }

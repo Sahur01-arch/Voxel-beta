@@ -2676,7 +2676,7 @@ Select Bot Settings:
 							caption: `*📍Title:* ${hasil.result.desc || '-'}\n*🕓Create At:* ${hasil.result.create_time}\n*🎃Author:* ${hasil.result.author.nickname} (@${hasil.result.author.unique_id})`
 						}, { quoted: m });
 					} else {
-						return m.reply('Url Tidak Valid!\n')
+						return m.reply('Url Tidak Valid!\n' + e)
 					}
 					setLimit(m, db)
 				} catch (e) {

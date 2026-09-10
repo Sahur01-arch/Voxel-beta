@@ -91,6 +91,11 @@ global.fetchApi = async (endpoint = '/', data = {}, options = {}) => {
 			const apiName = typeof options.api === 'number' ? apiList[options.api - 1] : options.name
 			const base = apiName ? (global.APIs[apiName] || apiName) : global.APIs.naze
 			const apikey = global.APIKeys[base] || '';
+			// Jangan kirim field/parameter apikey sama sekali kalau memang belum diisi.
+			// Mengirim "apikey=" kosong ke server tujuan (mis. siputzx) bisa dianggap
+			// sebagai apikey invalid, bukan request anonim, dan berujung 429 instan.
+			const hasAuthHeader = !!options.headers?.['Authorization'];
+			const apikeyField = (!hasAuthHeader && apikey) ? { apikey } : {};
 			let method = (options.method || 'GET').toUpperCase()
 			let url = base + endpoint 
 			let payload = null
@@ -99,12 +104,12 @@ global.fetchApi = async (endpoint = '/', data = {}, options = {}) => {
 			if (isForm) {
 				payload = data
 				method = 'POST'
-				headers = { ...(options.headers?.['Authorization'] ? {} : { apikey }), ...headers, ...data.getHeaders() }
+				headers = { ...apikeyField, ...headers, ...data.getHeaders() }
 			} else if (method !== 'GET') {
-				payload = { ...data, ...(options.headers?.['Authorization'] ? {} : { apikey }) }
+				payload = { ...data, ...apikeyField }
 				headers['content-type'] = 'application/json'
 			} else {
-				url += '?' + new URLSearchParams({ ...data, apikey }).toString()
+				url += (Object.keys({ ...data, ...apikeyField }).length ? '?' + new URLSearchParams({ ...data, ...apikeyField }).toString() : '')
 			}
 			const res = await axios({
 				method, url, data: payload,

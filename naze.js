@@ -531,6 +531,33 @@ const naze = async (naze, m, msg, store) => {
 		}
 		
 		
+		// Confess / Menfes - relay pesan ke lawan bicara
+		if (m.sender in menfes && !isCmd && !m.isGroup && m.chat === m.sender) {
+			const sesiMenfes = menfes[m.sender]
+			const tujuanMenfes = sesiMenfes.tujuan
+			const namaMenfes = sesiMenfes.nama || 'Seseorang'
+			try {
+				if (m.type === 'conversation' || m.type === 'extendedTextMessage') {
+					const teksMenfes = m.text || body || ''
+					if (teksMenfes) await naze.sendMessage(tujuanMenfes, { text: `*${namaMenfes}:*\n${teksMenfes}` })
+				} else if (m.msg && typeof m.msg === 'object' && m.type) {
+					const isiMenfes = { ...m.msg }
+					if ('caption' in isiMenfes) {
+						isiMenfes.caption = `*${namaMenfes}:*${isiMenfes.caption ? '\n' + isiMenfes.caption : ''}`
+						await naze.relayMessage(tujuanMenfes, { [m.type]: isiMenfes }, {})
+					} else {
+						await naze.sendMessage(tujuanMenfes, { text: `*${namaMenfes} mengirim pesan:*` })
+						await naze.relayMessage(tujuanMenfes, { [m.type]: isiMenfes }, {})
+					}
+				}
+			} catch (e) {
+				console.log('[Confess] Gagal relay pesan:', e)
+				m.reply('Gagal mengirim pesan, coba lagi.')
+			}
+			return !0
+		}
+		
+		
 		// Ular Tangga
 		if (m.isGroup && (!isCmd || isCreator) && (m.chat in ulartangga)) {
 			if (m.quoted && ulartangga[m.chat].id == m.quoted.id) {
@@ -2279,15 +2306,38 @@ Select Bot Settings:
 				}
 			}
 			break
-			case 'cuaca': case 'weather': {
-				if (!text) return m.reply(`Example: ${prefix + command} jakarta`)
-				try {
-					let { result: data } = await fetchApi('/api/info/cuaca', { city: text }, { name: 'naze' });
-					m.reply(`*🏙 Cuaca Kota ${data.name}*\n\n*🌤️ Cuaca :* ${data.weather[0].main}\n*📝 Deskripsi :* ${data.weather[0].description}\n*🌡️ Suhu Rata-rata :* ${data.main.temp} °C\n*🤔 Terasa Seperti :* ${data.main.feels_like} °C\n*🌬️ Tekanan :* ${data.main.pressure} hPa\n*💧 Kelembapan :* ${data.main.humidity}%\n*🌪️ Kecepatan Angin :* ${data.wind.speed} Km/h\n*📍Lokasi :*\n- *Bujur :* ${data.coord.lat}\n- *Lintang :* ${data.coord.lon}\n*🌏 Negara :* ${data.sys.country}`)
-				} catch (e) {
-					m.reply('Kota Tidak Di Temukan!\n' + e)
-				}
-			}
+		  case 'cuaca': case 'weather': {
+        if (!text) return m.reply(`Example: ${prefix + command} jakarta`)
+
+        try {
+          const { data } = await fetchApi(
+            '/info/cuaca',
+            { q: text },
+            { name: 'naze' }
+          )
+
+          const lokasi = data?.wilayah?.nama
+          const weather = data?.weather?.[0]?.cuaca?.[0]?.[0]
+
+          if (!lokasi || !weather) {
+            return m.reply('Data cuaca tidak ditemukan!')
+          }
+
+          m.reply(
+              `*🏙️ Cuaca ${lokasi}*\n\n` +
+              `*🌤️ Cuaca :* ${weather.weather_desc}\n` +
+              `*🌡️ Suhu :* ${weather.t}°C\n` +
+              `*💧 Kelembapan :* ${weather.hu}%\n` +
+              `*💨 Kecepatan Angin :* ${weather.ws} km/jam\n` +
+              `*🧭 Arah Angin :* ${weather.wd}\n` +
+              `*👁️ Jarak Pandang :* ${weather.vs_text}\n` +
+              `*🕐 Waktu :* ${weather.local_datetime}`
+          )
+        } catch (e) {
+            console.error('[CUACA]', e)
+              m.reply('Kota Tidak Ditemukan!')
+        }
+      }	
 			break
 			case 'sticker': case 'stiker': case 's': case 'stickergif': case 'stikergif': case 'sgif': case 'stickerwm': case 'swm': case 'curi': case 'colong': case 'take': case 'stickergifwm': case 'sgifwm': {
 				if (!/image|video|sticker/.test(quoted.type)) return m.reply(`Kirim/reply gambar/video/gif dengan caption ${prefix + command}\nDurasi Image/Video/Gif 1-9 Detik`)
@@ -2665,9 +2715,9 @@ Select Bot Settings:
 				if (!isLimit) return m.reply(global.mess.limit)
 				if (!text) return m.reply(`Example: ${prefix + command} url_tiktok`)
 				if (!text.includes('tiktok.com')) return m.reply('Url Tidak Mengandung Result Dari Tiktok!')
+				m.react('⏳')
 				try {
 					const hasil = await fetchApi('/d/tiktok', { url: text }, { name: 'naze' })
-					m.react('⏳')
 					if (hasil.result.download.type == "video") {
 						await m.reply({ video: { url: hasil.result.download?.video?.nowm_hd || hasil.result.download?.video?.nowm }, caption: `*📍Title:* ${hasil.result.desc || '-'}\n*🕓Create At:* ${hasil.result.create_time}\n*🎃Author:* ${hasil.result.author.nickname} (@${hasil.result.author.unique_id})` });
 					} else if (hasil.result.download.type == "images") {
@@ -2676,11 +2726,77 @@ Select Bot Settings:
 							caption: `*📍Title:* ${hasil.result.desc || '-'}\n*🕓Create At:* ${hasil.result.create_time}\n*🎃Author:* ${hasil.result.author.nickname} (@${hasil.result.author.unique_id})`
 						}, { quoted: m });
 					} else {
-						return m.reply('Url Tidak Valid!\n' + e)
+						throw new Error('Format respons siputzx tidak dikenali')
 					}
 					setLimit(m, db)
 				} catch (e) {
-					console.log(e)
+					console.log('[TikTok] siputzx gagal, mencoba betabotz...', e?.message || e)
+					// Fallback ke betabotz kalau siputzx lagi down/limit/berubah format
+					try {
+						const res = await fetchApi('/download/tiktok', { url: text }, { name: 'betabotz' })
+						const hasil = res.result || res
+						if (hasil.status === false) throw { isUpstreamLimit: true, msg: hasil.msg }
+						const images = hasil.images || hasil.image || hasil.slide || hasil.photo
+						const videoUrl = Array.isArray(hasil.video) ? hasil.video[0] : (hasil.video?.no_watermark || hasil.video?.noWatermark || hasil.video?.nowm || hasil.video?.hd || hasil.video?.url || (typeof hasil.video === 'string' ? hasil.video : null) || hasil.no_watermark || hasil.hd || hasil.play || hasil.download)
+						const caption = `*📍Title:* ${hasil.title || hasil.desc || hasil.caption || '-'}`
+						if (Array.isArray(images) && images.length) {
+							await naze.sendAlbumMessage(m.chat, {
+								album: images.map(a => ({ image: { url: typeof a === 'string' ? a : (a.url || a.link) } })),
+								caption
+							}, { quoted: m });
+						} else if (videoUrl) {
+							await m.reply({ video: { url: videoUrl }, caption });
+						} else {
+							throw new Error('[Betabotz] Format respons tidak dikenali: ' + JSON.stringify(res))
+						}
+						setLimit(m, db)
+					} catch (e2) {
+						console.log('[TikTok] betabotz juga gagal:', e2)
+						if (e2?.isUpstreamLimit) return m.reply(`Sumber (TikTok) lagi dibatasi sebentar (429). Coba lagi beberapa saat lagi ya.\n${e2.msg ? '_' + e2.msg + '_' : ''}`)
+						m.reply(global.mess.fail)
+					}
+				}
+			}
+			break
+			case 'tiktoksearch': case 'ttsearch': case 'ttsearchvid': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} perfect world`)
+				m.react('⏳')
+				try {
+					const res = await fetchApi('/search/tiktoks', { query: text }, { name: 'betabotz' })
+					const list = res.result || res.data || res
+					if (list?.status === false) throw { isUpstreamLimit: true, msg: list.msg }
+					const items = Array.isArray(list) ? list : (Array.isArray(list?.result) ? list.result : [])
+					if (!items.length) throw new Error('[Betabotz] Format respons tidak dikenali: ' + JSON.stringify(res))
+					const hasil = pickRandom(items)
+					const videoUrl = Array.isArray(hasil.video) ? hasil.video[0] : (hasil.video?.no_watermark || hasil.video?.noWatermark || hasil.video?.nowm || hasil.video?.url || (typeof hasil.video === 'string' ? hasil.video : null) || hasil.no_watermark || hasil.url || hasil.link || hasil.download)
+					const caption = `*📍Title:* ${hasil.title || hasil.desc || hasil.caption || '-'}\n\n_Hasil acak dari ${items.length} video ditemukan untuk "${text}"_`
+					if (!videoUrl) throw new Error('[Betabotz] Url video tidak ditemukan di hasil: ' + JSON.stringify(hasil))
+					await m.reply({ video: { url: videoUrl }, caption });
+					setLimit(m, db)
+				} catch (e) {
+					console.log('[TikTok Search] Error:', e)
+					if (e?.isUpstreamLimit) return m.reply(`Sumber (TikTok) lagi dibatasi sebentar (429). Coba lagi beberapa saat lagi ya.\n${e.msg ? '_' + e.msg + '_' : ''}`)
+					m.reply(global.mess.fail)
+				}
+			}
+			break
+			case 'tiktokrandom': case 'ttrandom': case 'asupantiktok': case 'ttasupan': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} cewek cantik`)
+				m.react('⏳')
+				try {
+					const res = await fetchApi('/asupan/tiktok', { query: text }, { name: 'betabotz' })
+					const hasil = res.result || res
+					if (hasil.status === false) throw { isUpstreamLimit: true, msg: hasil.msg }
+					const videoUrl = Array.isArray(hasil.video) ? hasil.video[0] : (hasil.video?.no_watermark || hasil.video?.noWatermark || hasil.video?.nowm || hasil.video?.url || (typeof hasil.video === 'string' ? hasil.video : null) || hasil.no_watermark || hasil.url || hasil.link || hasil.download)
+					const caption = `*📍Title:* ${hasil.title || hasil.desc || hasil.caption || '-'}`
+					if (!videoUrl) throw new Error('[Betabotz] Url video tidak ditemukan: ' + JSON.stringify(res))
+					await m.reply({ video: { url: videoUrl }, caption });
+					setLimit(m, db)
+				} catch (e) {
+					console.log('[TikTok Random] Error:', e)
+					if (e?.isUpstreamLimit) return m.reply(`Sumber (TikTok) lagi dibatasi sebentar (429). Coba lagi beberapa saat lagi ya.\n${e.msg ? '_' + e.msg + '_' : ''}`)
 					m.reply(global.mess.fail)
 				}
 			}
@@ -2689,13 +2805,28 @@ Select Bot Settings:
 				if (!isLimit) return m.reply(global.mess.limit)
 				if (!text) return m.reply(`Example: ${prefix + command} url_tiktok`)
 				if (!text.includes('tiktok.com')) return m.reply('Url Tidak Mengandung Result Dari Tiktok!')
+				m.react('⏳')
 				try {
 					const hasil = await fetchApi('/d/tiktok', { url: text });
-					m.react('⏳')
-					await m.reply({ audio: { url: hasil.result.download.music }, mimetype: 'audio/mpeg' })
+					const audioUrl = hasil.result?.download?.music
+					if (!audioUrl) throw new Error('[siputzx] Audio tidak ditemukan di respons')
+					await m.reply({ audio: { url: audioUrl }, mimetype: 'audio/mpeg' })
 					setLimit(m, db)
 				} catch (e) {
-					m.reply(global.mess.fail)
+					console.log('[TikTokMp3] siputzx gagal, mencoba betabotz...', e?.message || e)
+					try {
+						const res = await fetchApi('/download/tiktok', { url: text }, { name: 'betabotz' })
+						const hasil = res.result || res
+						if (hasil.status === false) throw { isUpstreamLimit: true, msg: hasil.msg }
+						const audioUrl = Array.isArray(hasil.audio) ? hasil.audio[0] : (hasil.audio?.url || (typeof hasil.audio === 'string' ? hasil.audio : null) || hasil.music)
+						if (!audioUrl) throw new Error('[Betabotz] Format respons tidak dikenali: ' + JSON.stringify(res))
+						await m.reply({ audio: { url: audioUrl }, mimetype: 'audio/mpeg' })
+						setLimit(m, db)
+					} catch (e2) {
+						console.log('[TikTokMp3] betabotz juga gagal:', e2)
+						if (e2?.isUpstreamLimit) return m.reply(`Sumber (TikTok) lagi dibatasi sebentar (429). Coba lagi beberapa saat lagi ya.\n${e2.msg ? '_' + e2.msg + '_' : ''}`)
+						m.reply(global.mess.fail)
+					}
 				}
 			}
 			break
@@ -2722,7 +2853,7 @@ Select Bot Settings:
 				if (!text) return m.reply(`Example: ${prefix + command} https://open.spotify.com/track/0JiVRyTJcJnmlwCZ854K4p`)
 				if (!isUrl(args[0]) && !args[0].includes('open.spotify.com/track')) return m.reply('Url Invalid!')
 				try {
-					const { result: hasil } = await fetchApi('/d/spotify', { url: text });
+					const { data: hasil } = await fetchApi('/d/spotify', { url: text });
 					m.react('⏳')
 					await m.reply({ audio: { url: hasil.url }, mimetype: 'audio/mpeg' })
 					setLimit(m, db)
@@ -2972,7 +3103,7 @@ Select Bot Settings:
 			break
 			case 'tekateki': {
 				if (iGame(tekateki, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/tekateki');
+				const { data: hasil } = await fetchApi('/games/tekateki');
 				let { key } = await m.reply(`🎮 Teka Teki Berikut :\n\n${hasil.soal}\n\nWaktu : 60s\nHadiah *+3499*`)
 				tekateki[m.chat + key.id] = {
 					jawaban: hasil.jawaban.toLowerCase(),
@@ -2987,7 +3118,7 @@ Select Bot Settings:
 			break
 			case 'tebaklirik': {
 				if (iGame(tebaklirik, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/tebaklirik');
+				const { data: hasil } = await fetchApi('/games/tebaklirik');
 				let { key } = await m.reply(`🎮 Tebak Lirik Berikut :\n\n${hasil.soal}\n\nWaktu : 90s\nHadiah *+4299*`)
 				tebaklirik[m.chat + key.id] = {
 					jawaban: hasil.jawaban.toLowerCase(),
@@ -3002,7 +3133,7 @@ Select Bot Settings:
 			break
 			case 'family100': {
 				if (family100.hasOwnProperty(m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/family100');
+				const { data: hasil } = await fetchApi('/games/family100');
 				let { key } = await m.reply(`🎮 Tebak Kata Berikut :\n\n${hasil.soal}\n\nWaktu : 5m\nHadiah *+3499*`)
 				family100[m.chat] = {
 					soal: hasil.soal,
@@ -3019,7 +3150,7 @@ Select Bot Settings:
 			break
 			case 'susunkata': {
 				if (iGame(susunkata, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/susunkata');
+				const { data: hasil } = await fetchApi('/games/susunkata');
 				let { key } = await m.reply(`🎮 Susun Kata Berikut :\n\n${hasil.soal}\nTipe : ${hasil.tipe}\n\nWaktu : 60s\nHadiah *+2989*`)
 				susunkata[m.chat + key.id] = {
 					jawaban: hasil.jawaban.toLowerCase(),
@@ -3034,7 +3165,7 @@ Select Bot Settings:
 			break
 			case 'tebakkimia': {
 				if (iGame(tebakkimia, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/tebakkimia');
+				const { data: hasil } = await fetchApi('/games/tebakkimia');
 				let { key } = await m.reply(`🎮 Tebak Kimia Berikut :\n\n${hasil.unsur}\n\nWaktu : 60s\nHadiah *+3499*`)
 				tebakkimia[m.chat + key.id] = {
 					jawaban: hasil.lambang.toLowerCase(),
@@ -3049,7 +3180,7 @@ Select Bot Settings:
 			break
 			case 'caklontong': {
 				if (iGame(caklontong, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/caklontong');
+				const { data: hasil } = await fetchApi('/games/caklontong');
 				let { key } = await m.reply(`🎮 Jawab Pertanyaan Berikut :\n\n${hasil.soal}\n\nWaktu : 60s\nHadiah *+9999*`)
 				caklontong[m.chat + key.id] = {
 					...hasil,
@@ -3063,35 +3194,51 @@ Select Bot Settings:
 				}
 			}
 			break
-			case 'tebakgambar': {
-				if (iGame(tebakgambar, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/tebakgambar');
-				let { key } = await naze.sendFileUrl(m.chat, hasil.img, `🎮 Tebak Gambar Berikut :\n\n${hasil.deskripsi}\n\nWaktu : 60s\nHadiah *+3499*`, m)
-				tebakgambar[m.chat + key.id] = {
-					jawaban: hasil.jawaban.toLowerCase(),
-					id: key.id
-				}
-				await sleep(60000)
-				if (rdGame(tebakgambar, m.chat, key.id)) {
-					m.reply('Waktu Habis\nJawaban: ' + tebakgambar[m.chat + key.id].jawaban)
-					delete tebakgambar[m.chat + key.id]
-				}
-			}
-			break
-			case 'tebakbendera': {
-				if (iGame(tebakbendera, m.chat)) return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
-				const { result: hasil } = await fetchApi('/games/tebakbendera');
-				let { key } = await m.reply(`🎮 Tebak Bendera Berikut :\n\n*Bendera : ${hasil.bendera}*\n\nWaktu : 60s\nHadiah *+3499*`)
-				tebakbendera[m.chat + key.id] = {
-					jawaban: hasil.negara.toLowerCase(),
-					id: key.id
-				}
-				await sleep(60000)
-				if (rdGame(tebakbendera, m.chat, key.id)) {
-					m.reply('Waktu Habis\nJawaban: ' + tebakbendera[m.chat + key.id].jawaban)
-					delete tebakbendera[m.chat + key.id]
-				}
-			}
+      case 'tebakbendera': {
+        if (iGame(tebakbendera, m.chat)) {
+          return m.reply('Masih Ada Sesi Yang Belum Diselesaikan!')
+        }
+
+        try {
+          const { data: hasil } = await fetchApi('/games/tebakbendera')
+
+          if (!hasil?.img || !hasil?.name) {
+            return m.reply('Gagal mendapatkan soal tebak bendera!')
+          }
+
+          const { key } = await naze.sendMessage(
+            m.chat,
+            {
+                image: { url: hasil.img },
+                caption: '🎮 *Tebak Bendera Berikut :*'
+            },
+            {
+                quoted: m
+            }
+          )
+
+          tebakbendera[m.chat + key.id] = {
+            jawaban: hasil.name.toLowerCase(),
+            id: key.id
+          }
+
+          await sleep(60000)
+
+          if (rdGame(tebakbendera, m.chat, key.id)) {
+            const game = tebakbendera[m.chat + key.id]
+
+            m.reply(
+                '⏰ Waktu Habis!\n\n' +
+                'Jawaban: *' + game.jawaban + '*'
+            )
+
+            delete tebakbendera[m.chat + key.id]
+          }
+        } catch (e) {
+            console.error('[TEBAK BENDERA]', e)
+            m.reply('Gagal mengambil soal tebak bendera!')
+        }
+      } 
 			break
 			case 'kuismath': case 'math': {
 				const { genMath, modes } = await import('./lib/math.js');
@@ -3551,6 +3698,8 @@ Select Bot Settings:
 │${setv} ${prefix}instagram (url)
 │${setv} ${prefix}tiktok (url)
 │${setv} ${prefix}tiktokmp3 (url)
+│${setv} ${prefix}tiktoksearch (kata kunci)
+│${setv} ${prefix}tiktokrandom (kata kunci)
 │${setv} ${prefix}facebook (url)
 │${setv} ${prefix}spotifydl (url)
 ╰─┬────❍
@@ -3788,6 +3937,8 @@ Select Bot Settings:
 │${setv} ${prefix}instagram (url)
 │${setv} ${prefix}tiktok (url)
 │${setv} ${prefix}tiktokmp3 (url)
+│${setv} ${prefix}tiktoksearch (kata kunci)
+│${setv} ${prefix}tiktokrandom (kata kunci)
 │${setv} ${prefix}facebook (url)
 │${setv} ${prefix}spotifydl (url)
 ╰──────❍`)

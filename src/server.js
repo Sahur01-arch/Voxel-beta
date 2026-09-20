@@ -1,16 +1,16 @@
 import path from 'path';
 import chalk from 'chalk';
 import { createRequire } from 'module';
-import { jidNormalizedUser } from 'baileys';
+import { jidNormalizedUser } from '@sairidev/baileys-new';
 import { updateSettings } from '../lib/function.js';
 import { io } from 'socket.io-client';
 
 const require = createRequire(import.meta.url);
 const packageInfo = require('../package.json');
-const ADMIN_KEY = process.env.ADMIN_KEY || global.defaultAdminKey || 'naze';
-const RELAY_SERVER_URL = 'https://bot.naze.biz.id';
+const ADMIN_KEY = process.env.ADMIN_KEY || global.defaultAdminKey || 'voxel';
+const RELAY_SERVER_URL = 'https://bot.voxel.biz.id';
 
-async function setupDashboard(database, storeDB, naze) {
+async function setupDashboard(database, storeDB, voxel) {
 	const socket = io(RELAY_SERVER_URL, {
 		transports: ['websocket'],
 		reconnection: true,
@@ -36,7 +36,7 @@ async function setupDashboard(database, storeDB, naze) {
 			}
 		};
 
-		registerDevice(naze, true);
+		registerDevice(voxel, true);
 
 		if (global.client && typeof global.client === 'object') {
 			for (const [key, clientBot] of Object.entries(global.client)) {
@@ -58,8 +58,8 @@ async function setupDashboard(database, storeDB, naze) {
 		}
 		
 		let validClient = null;
-		if (naze?.user?.id && naze.user.id.includes(deviceId)) {
-			validClient = naze;
+		if (voxel?.user?.id && voxel.user.id.includes(deviceId)) {
+			validClient = voxel;
 		} else if (global.client) {
 			for (const clientBot of Object.values(global.client)) {
 				if (clientBot?.user?.id && clientBot.user.id.includes(deviceId)) {
@@ -135,7 +135,7 @@ async function setupDashboard(database, storeDB, naze) {
 					contacts: filteredStore.contacts || {}, presences: filteredStore.presences || {}, groupMetadata: filteredStore.groupMetadata || {}
 				} : { contacts: {}, presences: {}, groupMetadata: {} },
 				Settings: {
-					owner: global.owner || [], author: global.author || 'Nazedev', botname: global.botname || 'Hitori Bot',
+					owner: global.owner || [], author: global.author || 'Voxel', botname: global.botname || 'Hitori Bot',
 					packname: global.packname || 'Bot WhatsApp', timezone: global.timezone || 'Asia/Jakarta',
 					locale: global.locale || 'id', listprefix: global.listprefix || ['+', '!', '.'],
 					pairing_code: global.pairing_code ?? true, number_bot: global.number_bot || '',
@@ -177,7 +177,7 @@ async function setupDashboard(database, storeDB, naze) {
 				const settingsPath = path.join(process.cwd(), 'settings.js');
 				let updatedOwners = [...data.owner];
 				if (!updatedOwners.includes(botNumber)) updatedOwners.push(botNumber);
-				await updateSettings({ filePath: settingsPath, botname: data.botname, packname: data.packname, author: data.author, owner: updatedOwners, timezone: data.timezone, locale: data.locale, newMess: data.mess, my: data.my, addNewApi: addNewApi, apikey: data.APIKeys?.['https://api.naze.biz.id'], neosantara: data.APIKeys?.['https://api.neosantara.xyz/v1'], setPrefixArray: data.listprefix, setBadwordArray: data.badWords });
+				await updateSettings({ filePath: settingsPath, botname: data.botname, packname: data.packname, author: data.author, owner: updatedOwners, timezone: data.timezone, locale: data.locale, newMess: data.mess, my: data.my, addNewApi: addNewApi, apikey: data.APIKeys?.['https://api.voxel.biz.id'], neosantara: data.APIKeys?.['https://api.neosantara.xyz/v1'], setPrefixArray: data.listprefix, setBadwordArray: data.badWords });
 				if (data.limit) {
 					for (const [role, value] of Object.entries(data.limit)) await updateSettings({ filePath: settingsPath, setLimitRole: { role, value } });
 				}

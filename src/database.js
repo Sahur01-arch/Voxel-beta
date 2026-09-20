@@ -203,6 +203,11 @@ const addExpired = ({ id, expired, ...options }, _dir) => {
 	const _cek = _dir.find((a) => a.id == id);
 	if (_cek) {
 		_cek.expired = _cek.expired + toMs(expired);
+		// Dulu di sini cuma .expired yang di-update -- field lain (mis. url
+		// invite grup yang ke-reset lalu di-addsewa ulang) nggak ikut
+		// ke-refresh, jadi data lama (yang mungkin sudah nggak valid) tetap
+		// nyangkut di database.
+		Object.assign(_cek, options);
 	} else {
 		_dir.push({ id, expired: Date.now() + toMs(expired), ...options });
 	}

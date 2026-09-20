@@ -1,6 +1,7 @@
 import '../settings.js';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import axios from 'axios';
 import chalk from 'chalk';
 import crypto from 'crypto';
@@ -13,25 +14,81 @@ import { fileTypeFromBuffer, fileTypeFromFile } from 'file-type';
 import { writeExif } from '../lib/exif.js';
 import { checkStatus } from './database.js';
 import { getBuffer, fixBytes } from '../lib/function.js';
-import { jidNormalizedUser, proto, getBinaryNodeChild, generateWAMessageContent, prepareWAMessageMedia, areJidsSameUser, extractMessageContent, generateMessageID, downloadContentFromMessage, generateWAMessageFromContent, jidDecode, generateWAMessage, getContentType, getDevice } from 'baileys';
+import { jidNormalizedUser, proto, getBinaryNodeChild, generateWAMessageContent, prepareWAMessageMedia, areJidsSameUser, extractMessageContent, generateMessageID, downloadContentFromMessage, generateWAMessageFromContent, jidDecode, generateWAMessage, getContentType, getDevice } from '@sairidev/baileys-new';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const nazePath = fileURLToPath(new URL('../naze.js', import.meta.url));
+const voxelPath = fileURLToPath(new URL('../voxel.js', import.meta.url));
 
-let nazeHandler = null;
+let voxelHandler = null;
 const botStartTime = Date.now();
 const groupMetadataTimers = {};
 
+// ============================================================
+// FIX BUG KRITIKAL: user "hilang" datanya (kelihatan tidak terdaftar
+// padahal sebelumnya sudah terdaftar).
+// ============================================================
+// Penyebabnya: WhatsApp sekarang kadang ngasih identitas pengirim sebagai
+// `@lid` (linked ID / privacy ID), bukan nomor telepon asli (`@s.whatsapp.net`).
+// Resolusi dari @lid ke nomor asli SEBELUM PATCH INI cuma mengandalkan cache
+// sesi yang sedang berjalan (`store.groupMetadata` / `store.contacts`) --
+// begitu cache itu belum ke-sync (misal abis restart bot, atau grup yang
+// jarang di-refresh metadata-nya), resolusi gagal dan `m.sender` jatuh balik
+// ke `@lid` mentah. Karena `global.db.users` di-key langsung pakai `m.sender`,
+// orang yang SAMA bisa kesimpen di 2 baris berbeda: satu di bawah nomor
+// teleponnya (data lama, `register`/limit/uang dsb), satu lagi di bawah
+// `@lid` (data baru, kosong/default) -- makanya kelihatan "tidak terdaftar".
+//
+// Perbaikannya: simpan hasil resolusi @lid -> nomor telepon secara PERMANEN
+// di `global.db.lidMap` (bukan cuma di `store` yang hilang tiap restart), dan
+// begitu resolusi berhasil, otomatis GABUNGKAN data user yang sempat kepisah
+// di bawah key @lid ke key nomor telepon yang benar.
+function linkLidToPhone(lidJid, phoneJid) {
+	if (!lidJid || !phoneJid || lidJid === phoneJid || !lidJid.endsWith('@lid') || phoneJid.endsWith('@lid')) {
+		return phoneJid || lidJid;
+	}
+	if (!global.db) return phoneJid;
+	global.db.lidMap = global.db.lidMap || {};
+	global.db.lidMap[lidJid] = phoneJid;
+
+	if (global.db.users?.[lidJid]) {
+		const lidUser = global.db.users[lidJid];
+		const phoneUser = global.db.users[phoneJid];
+		if (!phoneUser) {
+			global.db.users[phoneJid] = lidUser;
+		} else {
+			// Union sederhana: pertahankan status yang lebih "baik" & jangan
+			// sampai limit/uang yang sudah dikumpulkan hilang begitu saja.
+			phoneUser.register = phoneUser.register || lidUser.register;
+			phoneUser.vip = phoneUser.vip || lidUser.vip;
+			phoneUser.ban = phoneUser.ban || lidUser.ban;
+			if (typeof lidUser.limit === 'number') phoneUser.limit = Math.max(phoneUser.limit || 0, lidUser.limit);
+			if (typeof lidUser.money === 'number') phoneUser.money = (phoneUser.money || 0) + lidUser.money;
+			for (const key of ['name', 'age', 'regTime', 'afkReason']) {
+				if (lidUser[key] && !phoneUser[key]) phoneUser[key] = lidUser[key];
+			}
+		}
+		delete global.db.users[lidJid];
+	}
+	return phoneJid;
+}
+
+// Konsultasi peta permanen buat jid yang belum sempat ke-resolve live turn ini
+// (misal baru abis restart, store.groupMetadata masih kosong).
+function resolveFromLidMap(jid) {
+	if (!jid || !jid.endsWith('@lid')) return jid;
+	return global.db?.lidMap?.[jid] || jid;
+}
+
 /*
-	* Create By Naze
-	* Follow https://github.com/nazedev
+	* Create By Voxel
+	* Base Bot: Hitori MD - https://github.com/nazedev/hitori
 	* Whatsapp : https://whatsapp.com/channel/0029VaWOkNm7DAWtkvkJBK43
 */
 
 const reloadHandler = async () => {
 	try {
-		nazeHandler = (await import(`../naze.js?update=${Date.now()}`)).default;
+		voxelHandler = (await import(`../voxel.js?update=${Date.now()}`)).default;
 	} catch (err) {
 		console.error(chalk.redBright(`[ERROR] ${err}`));
 	}
@@ -39,7 +96,7 @@ const reloadHandler = async () => {
 
 reloadHandler();
 
-async function GroupUpdate(naze, m, store) {
+async function GroupUpdate(voxel, m, store) {
 	function clearParse(parse) {
 		try {
 			return JSON.parse(parse);
@@ -68,13 +125,13 @@ async function GroupUpdate(naze, m, store) {
 			132: 'mereset link grup!',
 			172: `@${normalizedTarget?.pn?.split('@')?.[0]} meminta bergabung`,
 		}
-		if (naze.public && global.db?.groups?.[m.chat]?.setinfo && messages[type]) {
-			await naze.sendMessage(m.chat, { text: `${admin} ${messages[type]}`, mentions: [m.sender, ...((normalizedTarget?.id || normalizedTarget)?.includes('@') ? [`${normalizedTarget.id || normalizedTarget}`] : [])].filter(Boolean)}, { ephemeralExpiration: m.expiration || m?.metadata?.ephemeralDuration || store?.messages[m.chat]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
+		if (voxel.public && global.db?.groups?.[m.chat]?.setinfo && messages[type]) {
+			await voxel.sendMessage(m.chat, { text: `${admin} ${messages[type]}`, mentions: [m.sender, ...((normalizedTarget?.id || normalizedTarget)?.includes('@') ? [`${normalizedTarget.id || normalizedTarget}`] : [])].filter(Boolean)}, { ephemeralExpiration: m.expiration || m?.metadata?.ephemeralDuration || store?.messages[m.chat]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
 		}
 		if (type === 20) {
 			clearTimeout(groupMetadataTimers[m.chat])
 			groupMetadataTimers[m.chat] = setTimeout(async () => {
-				store.groupMetadata[m.chat] = await naze.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
+				store.groupMetadata[m.chat] = await voxel.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
 				delete groupMetadataTimers[m.chat];
 			}, 5000);
 		} else if (type === 29 || type === 30) {
@@ -93,12 +150,12 @@ async function GroupUpdate(naze, m, store) {
 			if (!metadata.participants.some(a => (a.id === (normalizedTarget.id || normalizedTarget) || a.phoneNumber === (normalizedTarget.id || normalizedTarget)))) {
 				clearTimeout(groupMetadataTimers[m.chat])
 				groupMetadataTimers[m.chat] = setTimeout(async () => {
-					store.groupMetadata[m.chat] = await naze.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
+					store.groupMetadata[m.chat] = await voxel.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
 					delete groupMetadataTimers[m.chat];
 				}, 5000);
 			}
 		} else if (type === 28 || type === 32) {
-			if (m.fromMe && ((jidNormalizedUser(naze.user.id) == (normalizedTarget.id || normalizedTarget)) || (jidNormalizedUser(naze.user.lid) == (normalizedTarget.id || normalizedTarget)))) {
+			if (m.fromMe && ((jidNormalizedUser(voxel.user.id) == (normalizedTarget.id || normalizedTarget)) || (jidNormalizedUser(voxel.user.lid) == (normalizedTarget.id || normalizedTarget)))) {
 				delete store.messages[m.chat];
 				delete store.presences[m.chat];
 				delete store.groupMetadata[m.chat];
@@ -116,7 +173,7 @@ async function GroupUpdate(naze, m, store) {
 	}
 }
 
-async function GroupParticipantsUpdate(naze, update, store) {
+async function GroupParticipantsUpdate(voxel, update, store) {
 	try {
 		const { id, participants, author, action } = update;
 		function updateAdminStatus(participants, metadataParticipants, status) {
@@ -133,7 +190,7 @@ async function GroupParticipantsUpdate(naze, update, store) {
 				const participant = metadata.participants.find(a => a.id == jidNormalizedUser(jid))
 				let profile;
 				try {
-					profile = await naze.profilePictureUrl(jid, 'image');
+					profile = await voxel.profilePictureUrl(jid, 'image');
 				} catch {
 					profile = 'https://telegra.ph/file/95670d63378f7f4210f03.png';
 				}
@@ -143,13 +200,13 @@ async function GroupParticipantsUpdate(naze, update, store) {
 					if (!participant) {
 						clearTimeout(groupMetadataTimers[id])
 						groupMetadataTimers[id] = setTimeout(async () => {
-							store.groupMetadata[id] = await naze.groupMetadata(id).catch(e => ({ ...store.groupMetadata[id] }));
+							store.groupMetadata[id] = await voxel.groupMetadata(id).catch(e => ({ ...store.groupMetadata[id] }));
 							delete groupMetadataTimers[id];
 						}, 5000);
 					}
 				} else if (action === 'remove') {
 					if (global.db.groups[id]?.leave) messageText = global.db.groups[id]?.text?.setleave || `@\nLeaving From ${metadata.subject}`;
-					if ((jidNormalizedUser(naze.user.lid) == jidNormalizedUser(jid)) || (jidNormalizedUser(naze.user.id) == jidNormalizedUser(jid))) {
+					if ((jidNormalizedUser(voxel.user.lid) == jidNormalizedUser(jid)) || (jidNormalizedUser(voxel.user.id) == jidNormalizedUser(jid))) {
 						delete store.messages[id];
 						delete store.presences[id];
 						delete store.groupMetadata[id];
@@ -162,8 +219,8 @@ async function GroupParticipantsUpdate(naze, update, store) {
 					if (global.db.groups[id]?.demote) messageText = global.db.groups[id]?.text?.setdemote || `@\nDemote From ${metadata.subject}\nBy @admin`;
 					updateAdminStatus(participants, metadata.participants, null);
 				}
-				if (messageText && naze.public) {
-					await naze.sendMessageV3(id, {
+				if (messageText && voxel.public) {
+					await voxel.sendMessageV3(id, {
 						text: messageText.replace('@subject', metadata.subject).replace('@admin', author ? `@${author.split('@')[0]}` : '@admin').replace(/(?<=\s|^)@(?!\w)/g, `@${jid.split('@')[0]}`),
 						title: action == 'add' ? 'Welcome' : action == 'remove' ? 'Leaving' : action.charAt(0).toUpperCase() + action.slice(1),
 						description: metadata.subject,
@@ -188,9 +245,13 @@ async function GroupParticipantsUpdate(naze, update, store) {
 	}
 }
 
-async function LoadDataBase(naze, m) {
+async function LoadDataBase(voxel, m) {
 	try {
-		const botNumber = await naze.decodeJid(naze.user.id);
+		const botNumber = await voxel.decodeJid(voxel.user.id);
+		// Jaga-jaga terakhir: kalau m.sender masih @lid sampai sini (belum
+		// ke-resolve di Serialize), tetap coba pakai peta permanen supaya
+		// data user tidak sampai kesimpen di key @lid yang salah.
+		if (m.sender?.endsWith('@lid')) m.sender = resolveFromLidMap(m.sender);
 		let game = global.db.game || {};
 		let premium = global.db.premium || [];
 		let user = global.db.users[m.sender] || {};
@@ -220,7 +281,7 @@ async function LoadDataBase(naze, m) {
 			privateonly: true,
 			whitelistonly: false,
 			didyoumean: false,
-			author: global.author || 'Nazedev',
+			author: global.author || 'Voxel',
 			// null = belum diatur owner, wajib pakai prefix normal seperti user lain.
 			// Owner bisa jalankan `authorprefix off` bila memang ingin bypass prefix secara sengaja.
 			authorPrefix: null,
@@ -318,9 +379,9 @@ async function LoadDataBase(naze, m) {
 	}
 }
 
-async function MessagesUpsert(naze, message, store) {
+async function MessagesUpsert(voxel, message, store) {
 	try {
-		let botNumber = await naze.decodeJid(naze.user.id);
+		let botNumber = await voxel.decodeJid(voxel.user.id);
 		const msg = message.messages[0];
 		if ((msg?.messageTimestamp * 1000) < botStartTime) return;
 		const remoteJid = msg.key.remoteJid;
@@ -337,21 +398,21 @@ async function MessagesUpsert(naze, message, store) {
 			const lastChat = store.messages[remoteJid].array.shift();
 			store.messages[remoteJid].keyId.delete(lastChat.key.id);
 		}
-		if (!store.groupMetadata || Object.keys(store.groupMetadata).length === 0) store.groupMetadata ??= await naze.groupFetchAllParticipating().catch(e => ({}));
+		if (!store.groupMetadata || Object.keys(store.groupMetadata).length === 0) store.groupMetadata ??= await voxel.groupFetchAllParticipating().catch(e => ({}));
 		const type = msg.message ? (getContentType(msg.message) || Object.keys(msg.message)[0]) : '';
-		const m = await Serialize(naze, msg, store);
-		if (nazeHandler) {
-			nazeHandler(naze, m, msg, store);
+		const m = await Serialize(voxel, msg, store);
+		if (voxelHandler) {
+			voxelHandler(voxel, m, msg, store);
 		} else {
 			await reloadHandler();
-			if (nazeHandler) nazeHandler(naze, m, msg, store);
+			if (voxelHandler) voxelHandler(voxel, m, msg, store);
 		}
 		if (global.db?.set?.[botNumber]?.readsw && msg.key.remoteJid === 'status@broadcast') {
-			await naze.readMessages([msg.key]);
-			if (/protocolMessage/i.test(type)) await naze.sendFromOwner(global.db?.set?.[botNumber]?.owner || global.owner, 'Status dari @' + msg.key.participant.split('@')[0] + ' Telah dihapus', msg, { mentions: [msg.key.participant] });
+			await voxel.readMessages([msg.key]);
+			if (/protocolMessage/i.test(type)) await voxel.sendFromOwner(global.db?.set?.[botNumber]?.owner || global.owner, 'Status dari @' + msg.key.participant.split('@')[0] + ' Telah dihapus', msg, { mentions: [msg.key.participant] });
 			if (/(audioMessage|imageMessage|videoMessage|extendedTextMessage)/i.test(type)) {
 				let keke = (type == 'extendedTextMessage') ? `Story Teks Berisi : ${msg.message.extendedTextMessage.text ? msg.message.extendedTextMessage.text : ''}` : (type == 'imageMessage') ? `Story Gambar ${msg.message.imageMessage.caption ? 'dengan Caption : ' + msg.message.imageMessage.caption : ''}` : (type == 'videoMessage') ? `Story Video ${msg.message.videoMessage.caption ? 'dengan Caption : ' + msg.message.videoMessage.caption : ''}` : (type == 'audioMessage') ? 'Story Audio' : '\nTidak diketahui cek saja langsung'
-				await naze.sendFromOwner(global.db?.set?.[botNumber]?.owner || global.owner, `Melihat story dari @${msg.key.participant.split('@')[0]}\n${keke}`, msg, { mentions: [msg.key.participant] });
+				await voxel.sendFromOwner(global.db?.set?.[botNumber]?.owner || global.owner, `Melihat story dari @${msg.key.participant.split('@')[0]}\n${keke}`, msg, { mentions: [msg.key.participant] });
 			}
 		}
 	} catch (e) {
@@ -360,10 +421,10 @@ async function MessagesUpsert(naze, message, store) {
 	}
 }
 
-async function Solving(naze, store) {
-	naze.serializeM = (m) => MessagesUpsert(naze, m, store)
+async function Solving(voxel, store) {
+	voxel.serializeM = (m) => MessagesUpsert(voxel, m, store)
 	
-	naze.decodeJid = (jid) => {
+	voxel.decodeJid = (jid) => {
 		if (!jid) return jid
 		if (/:\d+@/gi.test(jid)) {
 			let decode = jidDecode(jid) || {}
@@ -371,7 +432,7 @@ async function Solving(naze, store) {
 		} else return jid
 	}
 	
-	naze.findJidByLid = (lid, store, resolve = false) => {
+	voxel.findJidByLid = (lid, store, resolve = false) => {
 		const groupMeta = store?.groupMetadata
 		if (groupMeta) {
 			for (const g of Object.values(groupMeta)) {
@@ -395,10 +456,10 @@ async function Solving(naze, store) {
 		return null
 	}
 	
-	naze.getName = async (jid, withoutContact = false) => {
-		const id = naze.decodeJid(jid);
+	voxel.getName = async (jid, withoutContact = false) => {
+		const id = voxel.decodeJid(jid);
 		if (id.endsWith('@g.us')) {
-			const groupInfo = store.contacts[id] || (store.groupMetadata[id] ? store.groupMetadata[id] : (store.groupMetadata[id] = await naze.groupMetadata(id).catch(e => ({ ...store.groupMetadata[id] })))) || {};
+			const groupInfo = store.contacts[id] || (store.groupMetadata[id] ? store.groupMetadata[id] : (store.groupMetadata[id] = await voxel.groupMetadata(id).catch(e => ({ ...store.groupMetadata[id] })))) || {};
 			return groupInfo.name || groupInfo.subject || parsePhoneNumber('+' + id.replace('@g.us', '')).number?.international;
 		} else {
 			if (id === '0@s.whatsapp.net') {
@@ -409,19 +470,19 @@ async function Solving(naze, store) {
 		}
 	}
 	
-	naze.sendContact = async (jid, kon, quoted = '', opts = {}) => {
+	voxel.sendContact = async (jid, kon, quoted = '', opts = {}) => {
 		let list = []
 		for (let i of kon) {
 			list.push({
-				displayName: await naze.getName(i + '@s.whatsapp.net'),
-				vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await naze.getName(i + '@s.whatsapp.net')}\nFN:${await naze.getName(i + '@s.whatsapp.net')}\nitem1.TEL;waid=${i}:${i}\nitem1.X-ABLabel:Ponsel\nitem2.ADR:;;Indonesia;;;;\nitem2.X-ABLabel:Region\nEND:VCARD`
+				displayName: await voxel.getName(i + '@s.whatsapp.net'),
+				vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await voxel.getName(i + '@s.whatsapp.net')}\nFN:${await voxel.getName(i + '@s.whatsapp.net')}\nitem1.TEL;waid=${i}:${i}\nitem1.X-ABLabel:Ponsel\nitem2.ADR:;;Indonesia;;;;\nitem2.X-ABLabel:Region\nEND:VCARD`
 			})
 		}
-		naze.sendMessage(jid, { contacts: { displayName: `${list.length} Kontak`, contacts: list }, ...opts }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
+		voxel.sendMessage(jid, { contacts: { displayName: `${list.length} Kontak`, contacts: list }, ...opts }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
 	}
 	
-	naze.profilePictureUrl = async (jid, type = 'image', timeoutMs) => {
-		const result = await naze.query({
+	voxel.profilePictureUrl = async (jid, type = 'image', timeoutMs) => {
+		const result = await voxel.query({
 			tag: 'iq',
 			attrs: {
 				target: jidNormalizedUser(jid),
@@ -440,8 +501,8 @@ async function Solving(naze, store) {
 		return child?.attrs?.url;
 	}
 	
-	naze.setStatus = (status) => {
-		naze.query({
+	voxel.setStatus = (status) => {
+		voxel.query({
 			tag: 'iq',
 			attrs: {
 				to: '@s.whatsapp.net',
@@ -457,47 +518,47 @@ async function Solving(naze, store) {
 		return status
 	}
 	
-	naze.relayMessageV2 = async (jid, message, options) => {
+	voxel.relayMessageV2 = async (jid, message, options) => {
 		const msg = generateWAMessageFromContent(jid, message, {
-			upload: naze.waUploadToServer,
+			upload: voxel.waUploadToServer,
 			messageId: generateMessageID(),
 			...options
 		});
-		const hasil = await naze.relayMessage(jid, msg.message, {
+		const hasil = await voxel.relayMessage(jid, msg.message, {
 			messageId: msg.key.id,
 			...options
 		});
 		return hasil;
 	}
 
-	naze.sendPoll = (jid, name = '', values = [], quoted, selectableCount = 1) => {
-		return naze.sendMessage(jid, { poll: { name, values, selectableCount }}, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
+	voxel.sendPoll = (jid, name = '', values = [], quoted, selectableCount = 1) => {
+		return voxel.sendMessage(jid, { poll: { name, values, selectableCount }}, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
 	}
 	
-	naze.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
+	voxel.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
 		const quotedOptions = { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 }
 		try {
 			const res = await axios.head(url);
 			let mime = res.headers['content-type'];
 			if (mime && mime.includes('gif')) {
-				return naze.sendMessage(jid, { video: { url }, caption: caption, gifPlayback: true, ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { video: { url }, caption: caption, gifPlayback: true, ...options }, quotedOptions);
 			} else if (mime && mime === 'application/pdf') {
-				return naze.sendMessage(jid, { document: { url }, mimetype: 'application/pdf', caption: caption, ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { document: { url }, mimetype: 'application/pdf', caption: caption, ...options }, quotedOptions);
 			} else if (mime && mime.includes('image')) {
-				return naze.sendMessage(jid, { image: { url }, caption: caption, ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { image: { url }, caption: caption, ...options }, quotedOptions);
 			} else if (mime && mime.includes('video')) {
-				return naze.sendMessage(jid, { video: { url }, caption: caption, mimetype: 'video/mp4', ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { video: { url }, caption: caption, mimetype: 'video/mp4', ...options }, quotedOptions);
 			} else if (mime && mime.includes('audio')) {
-				return naze.sendMessage(jid, { audio: { url }, mimetype: 'audio/mpeg', ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { audio: { url }, mimetype: 'audio/mpeg', ...options }, quotedOptions);
 			} else {
-				return naze.sendMessage(jid, { document: { url }, caption: caption, mimetype: mime, ...options }, quotedOptions);
+				return voxel.sendMessage(jid, { document: { url }, caption: caption, mimetype: mime, ...options }, quotedOptions);
 			}
 		} catch (e) {
-			return naze.sendMessage(jid, { text: url, ...options }, quotedOptions);
+			return voxel.sendMessage(jid, { text: url, ...options }, quotedOptions);
 		}
 	}
 	
-	naze.sendGroupInviteV4 = async (jid, participant, inviteCode, inviteExpiration, groupName = 'Unknown Subject', caption = 'Invitation to join my WhatsApp group', jpegThumbnail = null, options = {}) => {
+	voxel.sendGroupInviteV4 = async (jid, participant, inviteCode, inviteExpiration, groupName = 'Unknown Subject', caption = 'Invitation to join my WhatsApp group', jpegThumbnail = null, options = {}) => {
 		const msg = proto.Message.create({
 			groupInviteMessage: {
 				inviteCode,
@@ -512,24 +573,24 @@ async function Solving(naze, store) {
 			}
 		});
 		const message = generateWAMessageFromContent(participant, msg, options);
-		const invite = await naze.relayMessage(participant, message.message, { messageId: message.key.id })
+		const invite = await voxel.relayMessage(participant, message.message, { messageId: message.key.id })
 		return invite
 	}
 	
-	naze.sendFromOwner = async (jids, text, quoted, options = {}) => {
+	voxel.sendFromOwner = async (jids, text, quoted, options = {}) => {
 		for (const a of jids) {
 			const jid = a.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-			await naze.sendMessage(jid, { text, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
+			await voxel.sendMessage(jid, { text, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
 		}
 	}
 	
-	naze.sendText = async (jid, text, quoted, options = {}) => naze.sendMessage(jid, { text: text, mentions: [...text.matchAll(/@(\d{0,16})/g)].map(v => v[1] + '@s.whatsapp.net'), ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
+	voxel.sendText = async (jid, text, quoted, options = {}) => voxel.sendMessage(jid, { text: text, mentions: [...text.matchAll(/@(\d{0,16})/g)].map(v => v[1] + '@s.whatsapp.net'), ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 })
 	
-	naze.sendAsSticker = async (jid, pathMedia, quoted, options = {}) => {
+	voxel.sendAsSticker = async (jid, pathMedia, quoted, options = {}) => {
 		let buff = Buffer.isBuffer(pathMedia) ? pathMedia : /^data:.*?\/.*?;base64,/i.test(pathMedia) ? Buffer.from(pathMedia.split`,`[1], 'base64') : /^https?:\/\//.test(pathMedia) ? await (await getBuffer(pathMedia)) : fs.existsSync(pathMedia) ? pathMedia : Buffer.alloc(0);
 		const result = await writeExif(buff, options);
 		try {
-			let anu = await naze.sendMessage(jid, { sticker: { url: result }, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
+			let anu = await voxel.sendMessage(jid, { sticker: { url: result }, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
 			return anu;
 		} finally {
 			if (fs.existsSync(pathMedia)) fs.unlinkSync(pathMedia);
@@ -537,7 +598,7 @@ async function Solving(naze, store) {
 		}
 	}
 	
-	naze.downloadMediaMessage = async (message) => {
+	voxel.downloadMediaMessage = async (message) => {
 		const msg = message.msg || message;
 		msg.mediaKey = fixBytes(msg.mediaKey);
 		msg.fileSha256 = fixBytes(msg.fileSha256);
@@ -552,7 +613,7 @@ async function Solving(naze, store) {
 		return buffer
 	}
 	
-	naze.downloadAndSaveMediaMessage = async (message, filename, attachExtension = true) => {
+	voxel.downloadAndSaveMediaMessage = async (message, filename, attachExtension = true) => {
 	    const msg = message.msg || message;
 	    msg.mediaKey = fixBytes(msg.mediaKey);
 	    msg.fileSha256 = fixBytes(msg.fileSha256);
@@ -579,7 +640,7 @@ async function Solving(naze, store) {
 	    });
 	}
 	
-	naze.getFile = async (PATH) => {
+	voxel.getFile = async (PATH) => {
 		let filename;
 		let mime = 'application/octet-stream';
 		let ext = 'bin';
@@ -627,29 +688,29 @@ async function Solving(naze, store) {
 		return { filename, mime, ext, isTemp };
 	}
 	
-	naze.appendResponseMessage = async (m, text) => {
-		let apb = await generateWAMessage(m.chat, { text, mentions: m.mentionedJid }, { userJid: naze.user.id, quoted: m.quoted && m.quoted.fakeObj(), ephemeralExpiration: m.expiration || m?.metadata?.ephemeralDuration || store?.messages[m.chat]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
+	voxel.appendResponseMessage = async (m, text) => {
+		let apb = await generateWAMessage(m.chat, { text, mentions: m.mentionedJid }, { userJid: voxel.user.id, quoted: m.quoted && m.quoted.fakeObj(), ephemeralExpiration: m.expiration || m?.metadata?.ephemeralDuration || store?.messages[m.chat]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
 		apb.key = m.key
 		apb.key.id = [...Array(32)].map(() => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
-		apb.key.fromMe = areJidsSameUser(m.sender, naze.user.id);
+		apb.key.fromMe = areJidsSameUser(m.sender, voxel.user.id);
 		if (m.isGroup) apb.participant = m.sender;
-		return naze.ev.emit('messages.upsert', {
+		return voxel.ev.emit('messages.upsert', {
 			...m,
 			messages: [proto.WebMessageInfo.create(apb)],
 			type: 'append'
 		});
 	}
 
-	naze.appendResponseMessageV2 = async (jid, content) => {
-		let msg = await generateWAMessage(jid, content, { userJid: naze.user.id, ephemeralExpiration: store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
-		msg.key.fromMe = areJidsSameUser(jid, naze.user.id);
+	voxel.appendResponseMessageV2 = async (jid, content) => {
+		let msg = await generateWAMessage(jid, content, { userJid: voxel.user.id, ephemeralExpiration: store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0 });
+		msg.key.fromMe = areJidsSameUser(jid, voxel.user.id);
 		msg.key.id = [...Array(32)].map(() => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
-		return naze.ev.emit('messages.upsert', { type: 'append', messages: [proto.WebMessageInfo.create(msg)] });
+		return voxel.ev.emit('messages.upsert', { type: 'append', messages: [proto.WebMessageInfo.create(msg)] });
 	}
 	
-	naze.sendMedia = async (jid, pathMedia, fileName = '', caption = '', quoted = '', options = {}) => {
-		const { mime, filename, isTemp } = await naze.getFile(pathMedia);
-		const botNumber = naze.decodeJid(naze.user.id);
+	voxel.sendMedia = async (jid, pathMedia, fileName = '', caption = '', quoted = '', options = {}) => {
+		const { mime, filename, isTemp } = await voxel.getFile(pathMedia);
+		const botNumber = voxel.decodeJid(voxel.user.id);
 		const isWebpSticker = options.asSticker || /webp/.test(mime);
 		let type = 'document', mimetype = mime, pathFile = filename;
 		let filesToDelete = [];
@@ -658,7 +719,7 @@ async function Solving(naze, store) {
 			if (isWebpSticker) {
 				pathFile = await writeExif(filename, {
 					packname: options.packname || global.db?.set?.[botNumber]?.packname || 'Bot WhatsApp',
-					author: options.author || global.db?.set?.[botNumber]?.author || 'Nazedev',
+					author: options.author || global.db?.set?.[botNumber]?.author || 'Voxel',
 					categories: options.categories || [],
 				});
 				filesToDelete.push(pathFile);
@@ -668,7 +729,7 @@ async function Solving(naze, store) {
 				type = mime.split('/')[0];
 				mimetype = type == 'video' ? 'video/mp4' : type == 'audio' ? 'audio/mpeg' : mime;
 			}
-			let anu = await naze.sendMessage(jid, { [type]: { url: pathFile }, caption, mimetype, fileName, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0, ...options });
+			let anu = await voxel.sendMessage(jid, { [type]: { url: pathFile }, caption, mimetype, fileName, ...options }, { quoted, ephemeralExpiration: quoted?.expiration || quoted?.metadata?.ephemeralDuration || store?.messages[jid]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0, ...options });
 			return anu;
 		} finally {
 			filesToDelete.forEach(file => {
@@ -677,7 +738,7 @@ async function Solving(naze, store) {
 		}
 	}
 	
-	naze.sendAlbumMessage = async (jid, content = {}, options = {}) => {
+	voxel.sendAlbumMessage = async (jid, content = {}, options = {}) => {
 		const { album, mentions, contextInfo, ...others } = content;
 		for (const media of album) {
 			if (!media.image && !media.video) throw new TypeError(`album[i] must have image or video property`);
@@ -689,21 +750,156 @@ async function Solving(naze, store) {
 				expectedVideoCount: album.filter(m => m.video).length,
 			}
 		}, { quoted: options?.quoted || null });
-		await naze.relayMessage(jid, medias.message, { messageId: medias.key.id });
+		await voxel.relayMessage(jid, medias.message, { messageId: medias.key.id });
 		for (const media of album) {
-			const msg = await generateWAMessage(jid, { ...others, ...media }, { upload: naze.waUploadToServer });
+			const msg = await generateWAMessage(jid, { ...others, ...media }, { upload: voxel.waUploadToServer });
 			msg.message.messageContextInfo = {
 				messageAssociation: {
 					associationType: 1,
 					parentMessageKey: medias.key
 				}
 			}
-			await naze.relayMessage(jid, msg.message, { messageId: msg.key.id });
+			await voxel.relayMessage(jid, msg.message, { messageId: msg.key.id });
 		}
 		return medias;
 	}
 	
-	naze.sendListMsg = async (jid, content = {}, options = {}) => {
+	/**
+	 * Send an Android-only AIRich HTML Mini App.
+	 *
+	 * ⚠️ PERINGATAN (ditemukan saat audit): fungsi ini membangun message type
+	 * `GenAIaeacdsnwHtmlPrimitive` yang TIDAK ADA di skema resmi WhatsApp/
+	 * @sairidev/baileys-new (bandingkan dengan typename asli yang terdokumentasi:
+	 * GenAIMarkdownTextUXPrimitive, GenAICodeUXPrimitive, GenATableUXPrimitive -
+	 * WhatsApp cuma dukung primitif tetap itu, TIDAK ADA primitif HTML bebas).
+	 * String "aeacdsnw" di nama typename ini kemungkinan besar hasil karangan,
+	 * bukan hasil riset ke protokol asli. Trik "bypassDownload" (kirim pesan lalu
+	 * MESSAGE_EDIT ke pesan yang sama) juga tidak berdasar. Fungsi ini kemungkinan
+	 * besar gagal total atau berisiko kena flag anti-abuse karena meniru struktur
+	 * protokol internal bot Meta. commands/birthday.js SUDAH dipindah untuk tidak
+	 * memakai fungsi ini lagi (lihat commit terkait) - dibiarkan di sini hanya
+	 * supaya commands/flappybird.js (belum diaudit) tidak langsung rusak.
+	 *
+	 * This intentionally uses the low-level WhatsApp wire shape instead of
+	 * replacing @sairidev/baileys. The HTML is embedded in
+	 * AIRichResponseMessage.unifiedResponse.data as a GenAI HTML primitive.
+	 *
+	 * `bypassDownload` performs the second MESSAGE_EDIT relay used by current
+	 * Android clients to force the Rich HTML renderer to materialize the
+	 * WebView. No remote hosting is required for the HTML itself.
+	 */
+	voxel.sendHtmlApp = async (jid, html, options = {}) => {
+		if (typeof html !== 'string' || !html.trim()) {
+			throw new TypeError('sendHtmlApp: html must be a non-empty string')
+		}
+
+		const {
+			title = 'Voxel • Birthday Card',
+			text = '',
+			trustedSources = [],
+			bypassDownload = true,
+			quoted = null,
+			messageId = generateMessageID()
+		} = options
+
+		if (!Array.isArray(trustedSources)) {
+			throw new TypeError('sendHtmlApp: trustedSources must be an array')
+		}
+
+		const responseId = randomUUID();
+		const botResponseId = randomUUID();
+
+		const sections = [];
+		if (text) {
+			sections.push({
+				__typename: 'GenAIUnifiedResponseSection',
+				view_model: {
+					__typename: 'GenAISingleLayoutViewModel',
+					primitive: {
+						__typename: 'GenAIMarkdownTextUXPrimitive',
+						markdown: text
+					}
+				}
+			});
+		}
+
+		sections.push({
+			__typename: 'GenAIUnifiedResponseSection',
+			view_model: {
+				__typename: 'GenAISingleLayoutViewModel',
+				primitive: {
+					__typename: 'GenAIaeacdsnwHtmlPrimitive',
+					payload: html,
+					trusted_sources: trustedSources
+				}
+			}
+		});
+
+		const unified = {
+			__typename: 'GenAIUnifiedResponse',
+			response_id: responseId,
+			sections
+		};
+
+		const data = Buffer.from(JSON.stringify(unified), 'utf8');
+
+		const content = {
+			messageContextInfo: {
+				deviceListMetadata: {},
+				deviceListMetadataVersion: 2,
+				botMetadata: {
+					messageDisclaimerText: title,
+					botResponseId
+				}
+			},
+			botForwardedMessage: {
+				message: {
+					richResponseMessage: {
+						messageType: 1,
+						submessages: [],
+						unifiedResponse: { data },
+						contextInfo: {
+							forwardingScore: 1,
+							isForwarded: true,
+							forwardOrigin: 4,
+							forwardedAiBotMessageInfo: {
+								botJid: '867051314767696@bot'
+							}
+						}
+					}
+				}
+			}
+		};
+
+
+		const sent = await generateWAMessageFromContent(jid, content, {
+			quoted: quoted || undefined,
+			messageId
+		});
+
+		await voxel.relayMessage(jid, sent.message, {
+			messageId: sent.key.id
+		});
+
+		if (bypassDownload) {
+			const edit = await generateWAMessageFromContent(jid, {
+				protocolMessage: proto.Message.ProtocolMessage.create({
+					key: sent.key,
+					type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
+					editedMessage: sent.message,
+					timestampMs: Date.now()
+				})
+			}, { messageId: generateMessageID() });
+
+			await voxel.relayMessage(jid, edit.message, {
+				messageId: edit.key.id
+			});
+		}
+
+		return sent;
+	};
+
+	voxel.sendListMsg = async (jid, content = {}, options = {}) => {
 		const { text, caption, footer = '', title, subtitle, ai, contextInfo = {}, buttons = [], messageParamsJson = {}, mentions = [], ...media } = content;
 		const msg = await generateWAMessageFromContent(jid, {
 			viewOnceMessage: {
@@ -720,7 +916,7 @@ async function Solving(naze, store) {
 							subtitle,
 							hasMediaAttachment: Object.keys(media).length > 0,
 							...(media && typeof media === 'object' && Object.keys(media).length > 0 ? await generateWAMessageContent(media, {
-								upload: naze.waUploadToServer
+								upload: voxel.waUploadToServer
 							}) : {})
 						}),
 						nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
@@ -748,7 +944,7 @@ async function Solving(naze, store) {
 				}
 			}
 		}, {});
-		const hasil = await naze.relayMessage(msg.key.remoteJid, msg.message, {
+		const hasil = await voxel.relayMessage(msg.key.remoteJid, msg.message, {
 			messageId: msg.key.id,
 			additionalNodes: [{
 				tag: 'biz',
@@ -772,7 +968,7 @@ async function Solving(naze, store) {
 		return hasil
 	}
 	
-	naze.sendButtonMsg = async (jid, content = {}, options = {}) => {
+	voxel.sendButtonMsg = async (jid, content = {}, options = {}) => {
 		const { text, caption, footer = '', headerType = 1, ai, contextInfo = {}, buttons = [], mentions = [], ...media } = content;
 		const msg = await generateWAMessageFromContent(jid, {
 			viewOnceMessage: {
@@ -783,7 +979,7 @@ async function Solving(naze, store) {
 					},
 					buttonsMessage: {
 						...(media && typeof media === 'object' && Object.keys(media).length > 0 ? await generateWAMessageContent(media, {
-							upload: naze.waUploadToServer
+							upload: voxel.waUploadToServer
 						}) : {}),
 						contentText: text || caption || '',
 						footerText: footer,
@@ -805,7 +1001,7 @@ async function Solving(naze, store) {
 				}
 			}
 		}, {});
-		const hasil = await naze.relayMessage(msg.key.remoteJid, msg.message, {
+		const hasil = await voxel.relayMessage(msg.key.remoteJid, msg.message, {
 			messageId: msg.key.id,
 			additionalNodes: [{
 				tag: 'biz',
@@ -829,13 +1025,13 @@ async function Solving(naze, store) {
 		return hasil
 	}
 	
-	naze.newsletterMsg = async (key, content = {}, timeout = 5000) => {
+	voxel.newsletterMsg = async (key, content = {}, timeout = 5000) => {
 		const { type: rawType = 'INFO', name, description = '', picture = null, react, id, newsletter_id = key, ...media } = content;
 		const type = rawType.toUpperCase();
 		if (react) {
 			if (!(newsletter_id.endsWith('@newsletter') || !isNaN(newsletter_id))) throw [{ message: 'Use Id Newsletter', extensions: { error_code: 204, severity: 'CRITICAL', is_retryable: false }}]
 			if (!id) throw [{ message: 'Use Id Newsletter Message', extensions: { error_code: 204, severity: 'CRITICAL', is_retryable: false }}]
-			const hasil = await naze.query({
+			const hasil = await voxel.query({
 				tag: 'message',
 				attrs: {
 					to: key,
@@ -852,8 +1048,8 @@ async function Solving(naze, store) {
 			});
 			return hasil
 		} else if (media && typeof media === 'object' && Object.keys(media).length > 0) {
-			const msg = await generateWAMessageContent(media, { upload: naze.waUploadToServer });
-			const anu = await naze.query({
+			const msg = await generateWAMessageContent(media, { upload: voxel.waUploadToServer });
+			const anu = await voxel.query({
 				tag: 'message',
 				attrs: { to: newsletter_id, type: 'text' in media ? 'text' : 'media' },
 				content: [{
@@ -865,7 +1061,7 @@ async function Solving(naze, store) {
 			return anu
 		} else {
 			if ((/(FOLLOW|UNFOLLOW|DELETE)/.test(type)) && !(newsletter_id.endsWith('@newsletter') || !isNaN(newsletter_id))) return [{ message: 'Use Id Newsletter', extensions: { error_code: 204, severity: 'CRITICAL', is_retryable: false }}]
-			const _query = await naze.query({
+			const _query = await voxel.query({
 				tag: 'iq',
 				attrs: {
 					to: 's.whatsapp.net',
@@ -888,9 +1084,9 @@ async function Solving(naze, store) {
 		}
 	}
 	
-	naze.sendCarouselMsg = async (jid, body = '', footer = '', cards = [], options = {}) => {
+	voxel.sendCarouselMsg = async (jid, body = '', footer = '', cards = [], options = {}) => {
 		async function getImageMsg(url) {
-			const { imageMessage } = await generateWAMessageContent({ image: { url } }, { upload: naze.waUploadToServer });
+			const { imageMessage } = await generateWAMessageContent({ image: { url } }, { upload: voxel.waUploadToServer });
 			return imageMessage;
 		}
 		const cardPromises = cards.map(async (a) => {
@@ -930,11 +1126,11 @@ async function Solving(naze, store) {
 				}
 			}
 		}, {});
-		const hasil = await naze.relayMessage(msg.key.remoteJid, msg.message, { messageId: msg.key.id });
+		const hasil = await voxel.relayMessage(msg.key.remoteJid, msg.message, { messageId: msg.key.id });
 		return hasil
 	}
 
-	naze.sendMessageV3 = async (jid, content = {}, options = {}) => {
+	voxel.sendMessageV3 = async (jid, content = {}, options = {}) => {
 		const { text, title = '', description = '', thumbnailUrl, sourceUrl, contextInfo = {}, mentions = [] } = content;
 		if (thumbnailUrl && text) {
 			let compressedMedia;
@@ -947,7 +1143,7 @@ async function Solving(naze, store) {
 			} catch (error) {
 				compressedMedia = { url: thumbnailUrl };
 			}
-			const { imageMessage: img } = await prepareWAMessageMedia({ image: compressedMedia }, { upload: naze.waUploadToServer, mediaTypeOverride: 'thumbnail-link' });
+			const { imageMessage: img } = await prepareWAMessageMedia({ image: compressedMedia }, { upload: voxel.waUploadToServer, mediaTypeOverride: 'thumbnail-link' });
 			const linkUrl = sourceUrl || thumbnailUrl;
 			const customContextInfo = {
 				...contextInfo, ...options.contextInfo,
@@ -977,32 +1173,32 @@ async function Solving(naze, store) {
 					contextInfo: customContextInfo
 				}
 			};
-			const hasil = await naze.relayMessage(jid, payloadMessage, { messageId: generateMessageID() });
+			const hasil = await voxel.relayMessage(jid, payloadMessage, { messageId: generateMessageID() });
 			return hasil;
 		} else {
-			return await naze.sendMessage(jid, content, options);
+			return await voxel.sendMessage(jid, content, options);
 		}
 	}
 	
-	if (naze.user && naze.user.id) {
-		const botNumber = naze.decodeJid(naze.user.id);
+	if (voxel.user && voxel.user.id) {
+		const botNumber = voxel.decodeJid(voxel.user.id);
 		if (global.db?.set[botNumber]) {
-			naze.public = global.db.set[botNumber].public
-		} else naze.public = true
-	} else naze.public = true
+			voxel.public = global.db.set[botNumber].public
+		} else voxel.public = true
+	} else voxel.public = true
 
-	return naze
+	return voxel
 }
 
 /*
-	* Create By Naze
-	* Follow https://github.com/nazedev
+	* Create By Voxel
+	* Base Bot: Hitori MD - https://github.com/nazedev/hitori
 	* Whatsapp : https://whatsapp.com/channel/0029VaWOkNm7DAWtkvkJBK43
 */
 
-async function Serialize(naze, msg, store) {
-	const botLid = naze.decodeJid(naze.user.lid);
-	const botNumber = naze.decodeJid(naze.user.id);
+async function Serialize(voxel, msg, store) {
+	const botLid = voxel.decodeJid(voxel.user.lid);
+	const botNumber = voxel.decodeJid(voxel.user.id);
 	const m = { ...msg };
 	if (!m) return m
 	if (m.key) {
@@ -1011,34 +1207,42 @@ async function Serialize(naze, msg, store) {
 		m.fromMe = m.key.fromMe
 		m.isBot = ['HSK', 'BAE', 'B1E', '3EB0', 'B24E', 'WA'].some(a => m.id.startsWith(a) && [12, 16, 20, 22, 40].includes(m.id.length)) || /(.)\1{5,}|[^a-zA-Z0-9]|[^0-9A-F]/.test(m.id) || false
 		m.isGroup = m.chat.endsWith('@g.us')
-		if (!m.isGroup && m.chat.endsWith('@lid')) m.chat = naze.findJidByLid(m.chat, store) || m.chat;
-		m.sender = naze.decodeJid(m.fromMe && naze.user.id || m.key.participantAlt || m.key.participant || m.chat || '')
+		if (!m.isGroup && m.chat.endsWith('@lid')) {
+			const liveResolved = voxel.findJidByLid(m.chat, store);
+			m.chat = liveResolved ? linkLidToPhone(m.chat, liveResolved) : resolveFromLidMap(m.chat);
+		}
+		m.sender = voxel.decodeJid(m.fromMe && voxel.user.id || m.key.participantAlt || m.key.participant || m.chat || '')
+		m.sender = resolveFromLidMap(m.sender);
 		if (m.isGroup) {
-			if (!store.groupMetadata) store.groupMetadata = await naze.groupFetchAllParticipating().catch(e => ({}));
-			let metadata = store.groupMetadata[m.chat] ? store.groupMetadata[m.chat] : (store.groupMetadata[m.chat] = await naze.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] })));
+			if (!store.groupMetadata) store.groupMetadata = await voxel.groupFetchAllParticipating().catch(e => ({}));
+			let metadata = store.groupMetadata[m.chat] ? store.groupMetadata[m.chat] : (store.groupMetadata[m.chat] = await voxel.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] })));
 			if (!metadata) {
-				metadata = await naze.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
+				metadata = await voxel.groupMetadata(m.chat).catch(e => ({ ...store.groupMetadata[m.chat] }));
 				store.groupMetadata[m.chat] = metadata
 			}
 			m.metadata = metadata
 			m.metadata.size = (metadata.participants || []).length;
 			if (metadata.addressingMode === 'lid') {
 				const participant = metadata.participants.find(a => a.id === m.sender || a.phoneNumber === m.sender)
-				m.sender = participant?.phoneNumber || m.key.participantAlt || m.sender;
+				const liveResolvedSender = participant?.phoneNumber || m.key.participantAlt;
+				m.sender = liveResolvedSender ? linkLidToPhone(m.sender, voxel.decodeJid(liveResolvedSender)) : resolveFromLidMap(m.sender);
 				m.metadata.owner = m.metadata?.participants?.find(p => p.id === m.metadata.owner)?.id || m.metadata.owner;
 				m.metadata.subjectOwner = m.metadata?.participants?.find(p => p.id === m.metadata.subjectOwner)?.id || m.metadata.subjectOwner;
-				if(!m.sender.endsWith('@g.us')) store.contacts[m.sender] = { ...(store.contacts[m.sender] || {}), id: jidNormalizedUser(m.fromMe && naze.user.lid || participant?.id || store.contacts[m.sender]?.id || m.sender), phoneNumber: jidNormalizedUser(m.fromMe && naze.user.id || participant?.phoneNumber || store.contacts[m.sender]?.phoneNumber || m.sender), name: (m.fromMe && naze.user.name) || m.pushName };
+				if(!m.sender.endsWith('@g.us')) store.contacts[m.sender] = { ...(store.contacts[m.sender] || {}), id: jidNormalizedUser(m.fromMe && voxel.user.lid || participant?.id || store.contacts[m.sender]?.id || m.sender), phoneNumber: jidNormalizedUser(m.fromMe && voxel.user.id || participant?.phoneNumber || store.contacts[m.sender]?.phoneNumber || m.sender), name: (m.fromMe && voxel.user.name) || m.pushName };
 			}
 			m.admins = m.metadata.participants ? m.metadata.participants.filter(p => p.admin).map(p => ({ id: p.id, phoneNumber: p.phoneNumber, admin: p.admin })) : [];
-			m.isAdmin = m.admins.some(a => a.id === m.sender || a.phoneNumber === m.sender);
-			m.isBotAdmin = m.admins.some(a => [botNumber, botLid].includes(a.id) || [botNumber, botLid].includes(a.phoneNumber));
+			// Bandingin JID setelah buang suffix device (":12") biar nggak salah anggap
+			// bukan admin cuma gara-gara salah satu sisi ada device id-nya dan sisi lain nggak.
+			const stripDevice = (jid) => (jid || '').replace(/:\d+(?=@)/, '')
+			m.isAdmin = m.admins.some(a => stripDevice(a.id) === stripDevice(m.sender) || stripDevice(a.phoneNumber) === stripDevice(m.sender));
+			m.isBotAdmin = m.admins.some(a => [botNumber, botLid].map(stripDevice).includes(stripDevice(a.id)) || [botNumber, botLid].map(stripDevice).includes(stripDevice(a.phoneNumber)));
 		}
 		if (m.key.addressingMode === 'lid') {
 			if(!m.sender.endsWith('@g.us')) store.contacts[m.sender] = {
 				...(store.contacts[m.sender] || {}),
-				id: jidNormalizedUser(m.fromMe && naze.user.lid || store.contacts[m.sender]?.id || m.key.remoteJid),
-				phoneNumber: jidNormalizedUser(m.fromMe && naze.user.id || store.contacts[m.sender]?.phoneNumber || m.sender),
-				name: (m.fromMe && naze.user.name) || m.pushName
+				id: jidNormalizedUser(m.fromMe && voxel.user.lid || store.contacts[m.sender]?.id || m.key.remoteJid),
+				phoneNumber: jidNormalizedUser(m.fromMe && voxel.user.id || store.contacts[m.sender]?.phoneNumber || m.sender),
+				name: (m.fromMe && voxel.user.name) || m.pushName
 			}
 		}
 	}
@@ -1047,7 +1251,7 @@ async function Serialize(naze, msg, store) {
 		let inner = m.message[m.type];
 		m.msg = inner?.message ? inner.message[getContentType(inner.message) || Object.keys(inner.message)[0]] : (inner?.editedMessage ? inner.editedMessage : (extractMessageContent(inner) || inner));
 		m.body = m.message?.conversation || m.msg?.text || m.msg?.conversation || m.msg?.caption || m.msg?.selectedButtonId || m.msg?.singleSelectReply?.selectedRowId || m.msg?.selectedId || (m.type === 'interactiveResponseMessage' && m.message.interactiveResponseMessage?.nativeFlowResponseMessage ? JSON.parse(m.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson || '{}')?.id : '') || (m.type === 'editedMessage' || m.type === 'protocolMessage' ? (m.message[m.type]?.editedMessage?.extendedTextMessage?.text || m.message[m.type]?.editedMessage?.conversation || '') : '') || m.msg?.contentText || m.msg?.title || m.msg?.name || '';
-		m.mentionedJid = m.msg?.contextInfo?.mentionedJid?.map(a => naze.findJidByLid(a, store, true)) || []
+		m.mentionedJid = m.msg?.contextInfo?.mentionedJid?.map(a => voxel.findJidByLid(a, store, true)) || []
 		m.text = m.msg?.text || m.msg?.caption || m.message?.conversation || m.msg?.contentText || m.msg?.selectedDisplayText || m.msg?.title || '';
 		m.prefix = /^[°•π÷×¶∆£¢€¥®™+✓_=|~!?@#$%^&.©^]/gi.test(m.body) ? m.body.match(/^[°•π÷×¶∆£¢€¥®™+✓_=|~!?@#$%^&.©^]/gi)[0] : /[\uD800-\uDBFF][\uDC00-\uDFFF]/gi.test(m.body) ? m.body.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]/gi)[0] : ''
 		m.command = m.body && m.body.replace(m.prefix, '').trim().split(/ +/).shift()
@@ -1075,21 +1279,21 @@ async function Serialize(naze, msg, store) {
 				type: getContentType(qMsg) || Object.keys(qMsg)[0],
 				id: m.msg.contextInfo.stanzaId,
 				chat: m.msg.contextInfo.remoteJid || m.chat,
-				sender: naze.decodeJid(m.msg.contextInfo.participant),
-				fromMe: naze.decodeJid(m.msg.contextInfo.participant) === naze.decodeJid(naze.user.id),
+				sender: voxel.decodeJid(m.msg.contextInfo.participant),
+				fromMe: voxel.decodeJid(m.msg.contextInfo.participant) === voxel.decodeJid(voxel.user.id),
 				text: qMsg?.conversation || qMsg?.caption || '',
 			};
 			m.quoted.msg = extractMessageContent(qMsg[m.quoted.type]) || qMsg[m.quoted.type];
 			m.quoted.device = getDevice(m.quoted.id)
 			m.quoted.isBot = m.quoted.id ? ['HSK', 'BAE', 'B1E', '3EB0', 'B24E', 'WA'].some(a => m.quoted.id.startsWith(a) && [12, 16, 20, 22, 40].includes(m.quoted.id.length)) || /(.)\1{5,}|[^a-zA-Z0-9]|[^0-9A-F]/.test(m.quoted.id) : false
-			m.quoted.fromMe = m.quoted.sender === naze.decodeJid(naze.user.id)
-			m.quoted.mentionedJid = m.quoted?.msg?.contextInfo?.mentionedJid?.map(a => naze.findJidByLid(a, store, true)) || []
+			m.quoted.fromMe = m.quoted.sender === voxel.decodeJid(voxel.user.id)
+			m.quoted.mentionedJid = m.quoted?.msg?.contextInfo?.mentionedJid?.map(a => voxel.findJidByLid(a, store, true)) || []
 			m.quoted.body = m.quoted.message?.conversation || m.quoted.msg?.text || m.quoted.msg?.conversation || m.quoted.msg?.caption || m.quoted.msg?.selectedButtonId || m.quoted.msg?.singleSelectReply?.selectedRowId || m.quoted.msg?.selectedId || (m.quoted.type === 'interactiveResponseMessage' && m.quoted.message?.interactiveResponseMessage?.nativeFlowResponseMessage ? JSON.parse(m.quoted.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson || '{}')?.id : '') || (m.quoted.type === 'editedMessage' || m.quoted.type === 'protocolMessage' ? (m.quoted.message[m.quoted.type]?.editedMessage?.extendedTextMessage?.text || m.quoted.message[m.quoted.type]?.editedMessage?.conversation || '') : '') || m.quoted.msg?.contentText || m.quoted.msg?.title || m.quoted.msg?.name || '';
 			m.getQuotedObj = async () => {
 				if (!m.quoted.id) return null
-				let q = await global.loadMessage(m.chat, m.quoted.id, naze)
+				let q = await global.loadMessage(m.chat, m.quoted.id, voxel)
 				if (q) {
-					return await Serialize(naze, q, store)
+					return await Serialize(voxel, q, store)
 				} else {
 					return null
 				}
@@ -1097,7 +1301,7 @@ async function Serialize(naze, msg, store) {
 			m.quoted.key = {
 				remoteJid: m.msg?.contextInfo?.remoteJid || m.chat,
 				participant: m.quoted.sender,
-				fromMe: areJidsSameUser(naze.decodeJid(m.msg?.contextInfo?.participant), naze.decodeJid(naze?.user?.id)),
+				fromMe: areJidsSameUser(voxel.decodeJid(m.msg?.contextInfo?.participant), voxel.decodeJid(voxel?.user?.id)),
 				id: m.msg?.contextInfo?.stanzaId
 			}
 			m.quoted.isGroup = m.quoted.chat.endsWith('@g.us')
@@ -1124,9 +1328,9 @@ async function Serialize(naze, msg, store) {
 				message: m.quoted,
 				...(m.isGroup ? { participant: m.quoted.sender } : {})
 			});
-			m.quoted.download = () => naze.downloadMediaMessage(m.quoted)
+			m.quoted.download = () => voxel.downloadMediaMessage(m.quoted)
 			m.quoted.delete = () => {
-				naze.sendMessage(m.quoted.chat, {
+				voxel.sendMessage(m.quoted.chat, {
 					delete: {
 						remoteJid: m.quoted.chat,
 						fromMe: m.isBotAdmin ? false : true,
@@ -1138,11 +1342,11 @@ async function Serialize(naze, msg, store) {
 		}
 	}
 	
-	m.download = () => naze.downloadMediaMessage(m)
+	m.download = () => voxel.downloadMediaMessage(m)
 	
-	m.copy = () => Serialize(naze, JSON.parse(JSON.stringify(m)), store)
+	m.copy = () => Serialize(voxel, JSON.parse(JSON.stringify(m)), store)
 	
-	m.react = (u) => naze.sendMessage(m.chat, { react: { text: u, key: m.key }})
+	m.react = (u) => voxel.sendMessage(m.chat, { react: { text: u, key: m.key }})
 	
 	m.reply = async (content, options = {}) => {
 		const { quoted = m, chat = m.chat, caption = '', mentions = [], ephemeralExpiration = m.expiration || m?.metadata?.ephemeralDuration || store?.messages[m.chat]?.array?.slice(-1)[0]?.metadata?.ephemeralDuration || 0, ...validate } = options;
@@ -1151,7 +1355,7 @@ async function Serialize(naze, msg, store) {
 		const extractedMentions = [...textBody.matchAll(/@(\d{5,16})/g)].map(v => v[1] + '@s.whatsapp.net');
 		const fixMentions = [...new Set([...providedMentions, ...extractedMentions])];
 		if (typeof content === 'object') {
-			return naze.sendMessage(chat, content, { ...validate, quoted, ephemeralExpiration })
+			return voxel.sendMessage(chat, content, { ...validate, quoted, ephemeralExpiration })
 		} else if (typeof content === 'string') {
 			try {
 				if (/^https?:\/\//.test(content)) {
@@ -1159,15 +1363,15 @@ async function Serialize(naze, msg, store) {
 					const mime = res?.headers['content-type'] || '';
 					if (/gif|image|video|audio|pdf|stream/i.test(mime)) {
 						let type = /image/.test(mime) ? 'image' : /video/.test(mime) ? 'video' : /audio/.test(mime) ? 'audio' : 'document';
-						return naze.sendMessage(chat, { [type]: { url: content }, caption, mimetype: mime, ...validate }, { quoted, ephemeralExpiration })
+						return voxel.sendMessage(chat, { [type]: { url: content }, caption, mimetype: mime, ...validate }, { quoted, ephemeralExpiration })
 					} else {
-						return naze.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
+						return voxel.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
 					}
 				} else {
-					return naze.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
+					return voxel.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
 				}
 			} catch (e) {
-				return naze.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
+				return voxel.sendMessage(chat, { text: content, mentions: fixMentions, ...validate }, { quoted, ephemeralExpiration })
 			}
 		}
 	}
@@ -1184,7 +1388,7 @@ export {
 };
 
 // Reload Handler
-const watcher = chokidar.watch(nazePath, {
+const watcher = chokidar.watch(voxelPath, {
 	ignored: /^\./,
 	persistent: true,
 	awaitWriteFinish: {

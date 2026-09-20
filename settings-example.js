@@ -6,8 +6,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 
 /*
-	* Create By Naze Fork By Saryu
-	* Follow https://github.com/nazedev
+	* Create By Voxel Fork By Saryu
+	* Base Bot: Hitori MD - https://github.com/nazedev/hitori
   * Fork : https://github.com/Sahur01-arch/Voxel-beta
 	* Whatsapp : https://whatsapp.com/channel/0029VaWOkNm7DAWtkvkJBK43
 */
@@ -57,7 +57,7 @@ global.money = {
 }
 
 global.mess = {
-	key: "Apikey limit! Silahkan Upgrade: https://naze.biz.id",
+	key: "Apikey limit! Silahkan hubungi owner untuk upgrade.",
 	owner: "Khusus Owner!",
 	admin: "Khusus Admin!",
 	botAdmin: "Bot harus Admin!",
@@ -76,7 +76,7 @@ global.mess = {
 }
 
 global.APIs = {
-  naze: 'https://api.siputzx.my.id/api',
+  voxel: 'https://api.siputzx.my.id/api',
   lol: 'https://api.lolhuman.xyz/api',
   betabotz: 'https://api.betabotz.eu.org/api',
 }
@@ -97,6 +97,12 @@ global.jadwalSholat = {
 
 global.badWords = ["dongo","konsol"] // input kata-kata toxic yg lain. ex: ['dongo','dongonya']
 global.chatLength = 1000
+
+//~~~~~~~~~~~~< JADIBOT >~~~~~~~~~~~~\\
+global.jadibotMode = true       // true = fitur .jadibot bisa dipakai semua orang, false = fitur dimatikan total
+global.jadibotOwnerOnly = false // true = cuma owner utama yang boleh bikin Jadibot baru (paling ketat, override premium)
+global.jadibotPremiumOnly = false // true = cuma member Premium (dan owner) yang boleh bikin Jadibot baru
+global.jadibotLimit = 50        // maksimal sesi Jadibot yang boleh aktif bersamaan di server ini
 
 fs.watchFile(__filename, async () => {
 	console.log(chalk.yellowBright(`[UPDATE] ${__filename}`))

@@ -3,10 +3,15 @@ import chalk from 'chalk';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { watchFile, unwatchFile } from 'fs'
+import 'dotenv/config'
+// Impor file/modul lain WAJIB di bawahnya
+import voxel from './voxel.js'
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function start() {
+  console.log('API Key Terbaca:', process.env.GEMINI_API_KEY)
 	let args = [path.join(__dirname, 'index.js'), ...process.argv.slice(2)]
 	let p = spawn(process.argv[0], args, {
 		stdio: ['inherit', 'inherit', 'inherit', 'ipc']

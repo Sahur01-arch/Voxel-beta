@@ -1,7 +1,11 @@
 settings.js
-
+voxel_session/
+voxel_session
+.env
+.env.*
 node_modules/
-.env 
 nazedev/
 database/
 yarn.lock
+.DS_Store
+*.log

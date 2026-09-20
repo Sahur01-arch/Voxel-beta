@@ -1945,56 +1945,6 @@ const voxel = async (voxel, m, msg, store) => {
 			break
 			
 			// Bot Menu
-			case 'owner': case 'listowner': {
-				await voxel.sendContact(m.chat, ownerNumber, m);
-			}
-			break
-			case 'profile': case 'cek': {
-				const user = Object.keys(db.users)
-				const infoUser = db.users[m.sender]
-				await m.reply(`*👤Profile @${m.sender.split('@')[0]} :*\n🐋User Bot : ${user.includes(m.sender) ? 'True' : 'False'}\n🔥User : ${isVip ? 'VIP' : isPremium ? 'PREMIUM' : 'FREE'}${isPremium ? `\n⏳Expired : ${checkStatus(m.sender, premium) ? formatDate(getExpired(m.sender, db.premium)) : '-'}` : ''}\n🎫Limit : ${infoUser.limit}\n💰Uang : ${infoUser ? infoUser.money.toLocaleString('id-ID') : '0'}`)
-			}
-			break
-			case 'leaderboard': {
-				const entries = Object.entries(db.users).sort((a, b) => b[1].money - a[1].money).slice(0, 10).map(entry => entry[0]);
-				let teksnya = '╭──❍「 *LEADERBOARD* 」❍\n'
-				for (let i = 0; i < entries.length; i++) {
-					teksnya += `│• ${i + 1}. @${entries[i].split('@')[0]}\n│• Balance : ${db.users[entries[i]].money.toLocaleString('id-ID')}\n│\n`
-				}
-				m.reply(teksnya + '╰──────❍');
-			}
-			break
-			case 'req': case 'request': {
-				if (!text) return m.reply('Mau Request apa ke Owner?')
-				await m.reply(`*Request Telah Terkirim Ke Owner*\n_Terima Kasih🙏_`)
-				await voxel.sendFromOwner(ownerNumber, `Pesan Dari : @${m.sender.split('@')[0]}\nUntuk Owner\n\nRequest ${text}`, m, { contextInfo: { mentionedJid: [m.sender], isForwarded: true }})
-			}
-			break
-			case 'totalfitur': {
-				const total = ((fs.readFileSync(__filename).toString()).match(/case '/g) || []).length
-				m.reply(`Total Fitur : ${total}`);
-			}
-			break
-			case 'daily': case 'claim': {
-				daily(m, db)
-			}
-			break
-			case 'transfer': case 'tf': {
-				transfer(m, args, db, voxel, store)
-			}
-			break
-			case 'buy': {
-				buy(m, args, db)
-			}
-			break
-			case 'react': {
-				voxel.sendMessage(m.chat, { react: { text: args[0], key: m.quoted ? m.quoted.key : m.key }})
-			}
-			break
-			case 'tagme': {
-				m.reply(`@${m.sender.split('@')[0]}`, { mentions: [m.sender] })
-			}
-			break
 			case 'runtime': case 'tes': case 'bot': {
 				if (!args[0] && !args[1]) return m.reply(`*Bot Telah Online Selama*\n*${runtime(process.uptime())}*`);
 				switch(args[0]) {
@@ -3592,18 +3542,6 @@ Select Bot Settings:
 			break
 			
 			// Game Menu
-			case 'slot': {
-				await gameSlot(voxel, m, db)
-			}
-			break
-			case 'casino': {
-				await gameCasinoSolo(voxel, m, prefix, db)
-			}
-			break
-			case 'samgong': case 'kartu': {
-				await gameSamgongSolo(voxel, m, db)
-			}
-			break
 			case 'rampok': case 'merampok': {
 				await gameMerampok(m, db)
 			}

@@ -17,12 +17,11 @@ import { createRequire } from 'module';
 import { parsePhoneNumber } from 'awesome-phonenumber';
 import { makeWASocket as WAConnection, useMultiFileAuthState, Browsers, DisconnectReason, makeCacheableSignalKeyStore, fetchLatestWaWebVersion } from '@sairidev/baileys-new';
 
-import { startDashboardClient } from './bot-client/dashboard-client.js';
 import { restoreJadibotSessions } from './src/jadibot.js';
 import { startWebServer } from './web/server.js';
 import { assertInstalled, customHttpsAgent } from './lib/function.js';
 import { dataBase, cmdDel, checkStatus, checkExpired } from './src/database.js';
-import { GroupParticipantsUpdate, MessagesUpsert, Solving } from './src/message.js';
+import { GroupParticipantsUpdate, MessagesUpsert, Solving, syncGroupMetadataCache } from './src/message.js';
 
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
@@ -255,6 +254,19 @@ async function startVoxelBot() {
 				if (global.db) await database.write(global.db)
 				if (global.store) await storeDB.write(global.store)
 			}, 30 * 1000)
+		}
+
+		if (!global._metadataSyncInterval) {
+			global._metadataSyncInterval = setInterval(async () => {
+				try {
+					if (global.store && global.voxelRef) {
+						await syncGroupMetadataCache(global.voxelRef, global.store);
+						await storeDB.write(global.store);
+					}
+				} catch (e) {
+					console.warn('[METADATA] Auto refresh gagal:', e?.message || e);
+				}
+			}, 12 * 60 * 60 * 1000);
 		}
 	} catch (e) {
 		console.log(e)
@@ -580,19 +592,14 @@ async function startVoxelBot() {
 		}, 60 * 60 * 1000);
 	}
 
-	if (!setupServer && database && voxel) {
-		setupServer = true;
-		// Dashboard private punya sendiri (Vercel + polling), GANTI dari
-		// setupDashboard() lama yang connect ke bot.voxel.biz.id (server
-		// pihak ketiga). Diem sendiri kalau DASHBOARD_URL/DASHBOARD_KEY
-		// belum di-set -- lihat bot-client/dashboard-client.js.
-		startDashboardClient(voxel);
-	}
-
 	if (!webServerStarted) {
 		webServerStarted = true;
 		startWebServer();
 	}
+
+	global.voxelRef = voxel;
+	await syncGroupMetadataCache(voxel, global.store, { force: true });
+	if (global.store) await storeDB.write(global.store);
 
 	return voxel
 }
@@ -604,6 +611,13 @@ startVoxelBot().catch((e) => {
 
 const cleanup = async (signal) => {
 	console.log(chalk.greenBright(`[SYSTEM] Received ${signal}. Menyimpan database...`));
+	if (global.voxelRef && global.store) {
+		try {
+			await syncGroupMetadataCache(global.voxelRef, global.store, { force: true });
+		} catch (e) {
+			console.warn('[METADATA] Sync sebelum shutdown gagal:', e?.message || e);
+		}
+	}
 	if (global.db) await database.write(global.db)
 	if (global.store) await storeDB.write(global.store)
 	console.log('Menutup sistem. Exiting...')

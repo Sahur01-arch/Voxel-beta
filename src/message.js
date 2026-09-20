@@ -96,6 +96,49 @@ const reloadHandler = async () => {
 
 reloadHandler();
 
+export async function syncGroupMetadataCache(voxel, store, { force = false } = {}) {
+	if (!voxel || !store) return null;
+	store.groupMetadata = store.groupMetadata || {};
+
+	const refreshTargets = new Set(Object.keys(store.groupMetadata));
+	try {
+		const participating = await voxel.groupFetchAllParticipating().catch(() => ({}));
+		if (participating && typeof participating === 'object') {
+			for (const [id, metadata] of Object.entries(participating)) {
+				if (!id) continue;
+				refreshTargets.add(id);
+				if (metadata) store.groupMetadata[id] = { ...(store.groupMetadata[id] || {}), ...metadata };
+			}
+		}
+	} catch (e) {
+		console.warn('[METADATA] Gagal refresh daftar grup participating:', e?.message || e);
+	}
+
+	for (const id of [...refreshTargets]) {
+		try {
+			const fresh = await voxel.groupMetadata(id).catch(() => null);
+			if (fresh) {
+				store.groupMetadata[id] = { ...(store.groupMetadata[id] || {}), ...fresh };
+			}
+		} catch (e) {
+			console.warn(`[METADATA] Gagal sync metadata grup ${id}:`, e?.message || e);
+		}
+	}
+
+	if (force && store.groupMetadata) {
+		for (const [id, metadata] of Object.entries(store.groupMetadata)) {
+			if (!metadata || !metadata.participants) continue;
+			metadata.participants = metadata.participants.map((p) => ({
+				...p,
+				id: p.id || p.phoneNumber || p.jid,
+				phoneNumber: p.phoneNumber || p.id || p.jid,
+			}));
+		}
+	}
+
+	return store.groupMetadata;
+}
+
 async function GroupUpdate(voxel, m, store) {
 	function clearParse(parse) {
 		try {

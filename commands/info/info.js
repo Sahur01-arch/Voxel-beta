@@ -38,7 +38,14 @@ async function requestCommand(ctx) {
 
 async function totalFiturCommand(ctx) {
 	const { m } = ctx;
-	return m.reply(`Total Fitur : ${CommandIndex.size}`);
+	const legacyCases = Array.isArray(global.db?.cases) ? global.db.cases : [];
+	const registryKeys = Array.from(CommandIndex.keys());
+	const uniqueKeys = new Set(
+		[...legacyCases, ...registryKeys]
+			.map((key) => String(key).trim().toLowerCase())
+			.filter(Boolean)
+	);
+	return m.reply(`Total Fitur : ${uniqueKeys.size}`);
 }
 
 export default {

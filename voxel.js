@@ -4654,6 +4654,19 @@ Select Bot Settings:
 │${setv} ${prefix}archipelago (query)
 │${setv} ${prefix}deepseek (query)
 │${setv} ${prefix}txt2img (query)
+├──❍「 *AI Tanpa API Key* 」❍
+│${setv} ${prefix}gpt5 (query)
+│${setv} ${prefix}claudehaiku (query)
+│${setv} ${prefix}qwen3 (query)
+│${setv} ${prefix}deepthink (query)
+│${setv} ${prefix}dolphin (query)
+│${setv} ${prefix}matematika (soal)
+│${setv} ${prefix}muslimai (query)
+│${setv} ${prefix}feelbetter (curhat)
+│${setv} ${prefix}simi (query)
+│${setv} ${prefix}quilbot (teks)
+│${setv} ${prefix}waguri (query)
+│${setv} ${prefix}kobo-ai (query)
 ╰──────❍`)
 			}
 			break

@@ -26,7 +26,7 @@ import { UguuSe } from './lib/uploader.js';
 import TicTacToe from './lib/tictactoe.js';
 import { antiSpam } from './src/antispam.js';
 import { ytMp4, ytMp3 } from './lib/scraper.js';
-import { tiktokDl, igdl, spotifydl, pinterest as pinterestDl, threadsdl, mediafire, wallpaperScraper, generateIQC, RemoveBG, imgupscale, videoenhancer, stickerPack } from './lib/scrapers/index.js';
+import { tiktokDl, igdl, spotifydl, pinterest as pinterestDl, threadsdl, mediafire, wallpaperScraper, generateIQC, RemoveBG, imgupscale, videoenhancer, stickerPack, githubstalkFallback, facebookFallback, ffstalk, mlstalk, npmstalk, lyricsSearch, twitterdl, nanoEdit, animeSearch } from './lib/scrapers/index.js';
 import { sharpUpscale, imagemagickUpscale, jimpUpscale } from './lib/upscaler.js';
 import templateMenu from './lib/template_menu.js';
 import { toAudio, toPTT } from './lib/converter.js';
@@ -61,40 +61,6 @@ const CONFESS_MAX_PER_HOUR = 5;
 const confessSessionLog = [];
 const menfesAwaitingReply = new Set();
 const settingsPath = path.join(__dirname, 'settings.js');
-
-// Fake-quote buat tampilan confess/menfess: "from: nama" muncul di DALAM
-// bubble reply (isi teksnya bebas kita atur), sementara header di atas
-// bubble itu (siapa "pengirim" yang di-reply) selalu ditentukan WhatsApp
-// si penerima berdasarkan identitas participant -- makanya participant-nya
-// SENGAJA diisi nomor BOT sendiri, BUKAN nomor confessor asli, biar
-// anonimitas tetap terjaga walau headernya nggak bisa full custom (batasan
-// protokol WhatsApp, bukan keterbatasan kode).
-function buildConfessQuoteContext(voxel, label) {
-	return {
-		participant: voxel.decodeJid(voxel.user.id),
-		stanzaId: 'CONFESS' + Date.now() + Math.floor(Math.random() * 1000),
-		quotedMessage: { conversation: `from: ${label}` },
-	};
-}
-
-// Catat key pesan status yang baru diupload lewat .upsw, biar .delsw bisa
-// hapus lagi tanpa perlu owner inget/salin ID pesannya manual. Disimpan di
-// global.db (bukan cuma variabel di memori) supaya masih ada walau bot
-// sempat restart di antara upload dan hapusnya.
-function saveStatusHistory(botNumber, key) {
-	if (!key) {
-		console.log(chalk.redBright('[UPSW] sendMessage tidak mengembalikan key pesan -- kemungkinan status GAGAL terkirim walau tidak throw error.'));
-		return;
-	}
-	console.log(chalk.greenBright(`[UPSW] Status terkirim, message ID: ${key.id}`));
-	if (!global.db?.set?.[botNumber]) return;
-	const setBot = global.db.set[botNumber];
-	setBot.statusHistory = setBot.statusHistory || [];
-	setBot.statusHistory.push({ key, timestamp: Date.now() });
-	// Status WhatsApp otomatis hilang sendiri setelah 24 jam -- nggak perlu
-	// nyimpen riwayat lebih dari itu, biar database nggak membengkak.
-	if (setBot.statusHistory.length > 30) setBot.statusHistory = setBot.statusHistory.slice(-30);
-}
 let canvasModule = null;
 
 /*
@@ -228,6 +194,12 @@ const voxel = async (voxel, m, msg, store) => {
     const externalCommand = externalCommands.get(command);
 
     if (externalCommand) {
+      // ctx.isLimit dulu nggak pernah dikirim ke sini -- destructure `isLimit`
+      // di command manapun di folder commands/ (tiktok, brat, susunkata, ai/*)
+      // otomatis jadi `undefined`, dan `if (!isLimit)` selalu true. Efeknya:
+      // semua command eksternal langsung balas "limit habis" walau limit
+      // usernya masih banyak, tanpa error apapun yang kelihatan.
+      const isLimitExternal = isCreator || (db.users[m.sender] ? (db.users[m.sender].limit > 0) : false);
       try {
         await externalCommand.execute({
             m,
@@ -240,6 +212,7 @@ const voxel = async (voxel, m, msg, store) => {
             command,
             prefix,
             isCreator,
+            isLimit: isLimitExternal,
             isGroup: m.isGroup
         });
       } catch (error) {
@@ -708,19 +681,16 @@ const voxel = async (voxel, m, msg, store) => {
 			try {
 				if (m.type === 'conversation' || m.type === 'extendedTextMessage') {
 					const teksMenfes = m.text || body || ''
-					if (teksMenfes) {
-						await voxel.sendMessage(tujuanMenfes, {
-							text: teksMenfes,
-							contextInfo: buildConfessQuoteContext(voxel, namaMenfes),
-						})
-					}
+					if (teksMenfes) await voxel.sendMessage(tujuanMenfes, { text: `*${namaMenfes}:*\n${teksMenfes}` })
 				} else if (m.msg && typeof m.msg === 'object' && m.type) {
 					const isiMenfes = { ...m.msg }
-					isiMenfes.contextInfo = {
-						...(isiMenfes.contextInfo || {}),
-						...buildConfessQuoteContext(voxel, namaMenfes),
+					if ('caption' in isiMenfes) {
+						isiMenfes.caption = `*${namaMenfes}:*${isiMenfes.caption ? '\n' + isiMenfes.caption : ''}`
+						await voxel.relayMessage(tujuanMenfes, { [m.type]: isiMenfes }, {})
+					} else {
+						await voxel.sendMessage(tujuanMenfes, { text: `*${namaMenfes} mengirim pesan:*` })
+						await voxel.relayMessage(tujuanMenfes, { [m.type]: isiMenfes }, {})
 					}
-					await voxel.relayMessage(tujuanMenfes, { [m.type]: isiMenfes }, {})
 				}
 				// Giliran abis dipakai -- m.sender nunggu, tujuanMenfes gantian
 				// boleh kirim (kalau sebelumnya dia yang nunggu, sekarang bebas).
@@ -1302,98 +1272,39 @@ const voxel = async (voxel, m, msg, store) => {
 			break
 			case 'upsw': {
 				if (!isCreator) return m.reply(global.mess.owner)
-				// statusJidList nentuin siapa aja yang dikasih "kunci" buat bisa
-				// LIHAT status ini. Dua hal penting:
-				// 1. Nomor bot sendiri WAJIB ikut masuk, atau HP asli kamu sendiri
-				//    nggak akan kebagian kunci buat nampilin status itu di tab-nya
-				//    sendiri -- walau pengiriman ke server tetap "sukses".
-				// 2. Cuma JID nomor telepon asli (@s.whatsapp.net) yang valid buat
-				//    ini -- kalau ada key @lid ikut kebawa dari db.users, proses
-				//    enkripsi buat status bisa gagal diam-diam tanpa keliatan error.
-				const statusJidList = [...new Set([
-					botNumber,
-					...Object.keys(db.users).filter((jid) => jid.endsWith('@s.whatsapp.net')),
-				])]
-				console.log(chalk.cyanBright(`[UPSW] Mengirim status ke ${statusJidList.length} penerima (termasuk nomor bot sendiri).`))
+				const statusJidList = Object.keys(db.users)
 				const backgroundColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 				try {
 					if (quoted.isMedia) {
 						let media = await voxel.downloadAndSaveMediaMessage(qmsg);
 						try {
 							if (/image|video/.test(quoted.mime)) {
-								// mimetype dibersihkan dulu (buang embel-embel semacam
-								// "; codecs=avc1..." yang kadang nempel di metadata asli)
-								// sebelum dikirim ulang -- mimetype APA ADANYA yang nggak
-								// standar itu yang kemarin bikin WhatsApp app nolak muterin
-								// videonya ("Tidak bisa memutar video ini"). ptv/gifPlayback
-								// SENGAJA nggak dipaksa lagi, biarkan Baileys yang nentuin
-								// otomatis dari hasil probing video aslinya.
-								const cleanMime = quoted.mime.split(';')[0].trim();
-								const sentStatus = await voxel.sendMessage('status@broadcast', {
-									[`${cleanMime.split('/')[0]}`]: { url: media },
-									mimetype: cleanMime,
-									caption: text || m.quoted?.body || '',
-									backgroundColor,
+								await voxel.sendMessage('status@broadcast', {
+									[`${quoted.mime.split('/')[0]}`]: { url: media },
+									caption: text || m.quoted?.body || ''
 								}, { statusJidList, broadcast: true })
-
-								// Dicatat biar bisa dihapus lagi lewat .delsw tanpa perlu
-								// tau/inget ID pesannya secara manual.
-								saveStatusHistory(botNumber, sentStatus?.key);
 								m.react('✅')
 							} else if (/audio/.test(quoted.mime)) {
-								const sentStatus = await voxel.sendMessage('status@broadcast', {
+								await voxel.sendMessage('status@broadcast', {
 									audio: { url: media },
 									mimetype: 'audio/mp4',
 									ptt: true
 								}, { backgroundColor, statusJidList, broadcast: true })
-								saveStatusHistory(botNumber, sentStatus?.key);
 								m.react('✅')
 							} else m.reply('Only Support video/audio/image/text')
 						} finally {
 							if (fs.existsSync(media)) fs.unlinkSync(media);
 						}
 					} else if (quoted.text) {
-						const sentStatus = await voxel.sendMessage('status@broadcast', { text: text || m.quoted?.body || '' }, {
+						await voxel.sendMessage('status@broadcast', { text: text || m.quoted?.body || '' }, {
 							textArgb: 0xffffffff,
 							font: Math.floor(Math.random() * 9),
 							backgroundColor, statusJidList,
 							broadcast: true
 						})
-						saveStatusHistory(botNumber, sentStatus?.key);
 						m.react('✅')
 					} else m.reply('Only Support video/audio/image/text')
 				} catch (e) {
-					console.log('[UPSW] Gagal upload status:', e)
-					m.reply(global.mess.fail)
-				}
-			}
-			break
-			case 'delsw': case 'delstatus': {
-				if (!isCreator) return m.reply(global.mess.owner)
-				const history = global.db.set[botNumber].statusHistory || []
-
-				if (args[0] === 'all') {
-					if (!history.length) return m.reply('Tidak ada status tercatat buat dihapus.')
-					let success = 0
-					for (const item of history) {
-						try {
-							await voxel.sendMessage('status@broadcast', { delete: item.key })
-							success++
-						} catch (e) {}
-					}
-					global.db.set[botNumber].statusHistory = []
-					return m.reply(`✅ ${success}/${history.length} status berhasil dihapus.`)
-				}
-
-				const last = history[history.length - 1]
-				if (!last) return m.reply('Tidak ada status tercatat buat dihapus (mungkin bot baru restart, atau statusnya sudah lebih dari 24 jam/kadaluarsa sendiri).')
-				try {
-					await voxel.sendMessage('status@broadcast', { delete: last.key })
-					history.pop()
-					global.db.set[botNumber].statusHistory = history
-					m.react('✅')
-				} catch (e) {
-					console.log('[DELSW] Gagal hapus status:', e)
 					m.reply(global.mess.fail)
 				}
 			}
@@ -2041,56 +1952,6 @@ const voxel = async (voxel, m, msg, store) => {
 			break
 			
 			// Bot Menu
-			case 'owner': case 'listowner': {
-				await voxel.sendContact(m.chat, ownerNumber, m);
-			}
-			break
-			case 'profile': case 'cek': {
-				const user = Object.keys(db.users)
-				const infoUser = db.users[m.sender]
-				await m.reply(`*👤Profile @${m.sender.split('@')[0]} :*\n🐋User Bot : ${user.includes(m.sender) ? 'True' : 'False'}\n🔥User : ${isVip ? 'VIP' : isPremium ? 'PREMIUM' : 'FREE'}${isPremium ? `\n⏳Expired : ${checkStatus(m.sender, premium) ? formatDate(getExpired(m.sender, db.premium)) : '-'}` : ''}\n🎫Limit : ${infoUser.limit}\n💰Uang : ${infoUser ? infoUser.money.toLocaleString('id-ID') : '0'}`)
-			}
-			break
-			case 'leaderboard': {
-				const entries = Object.entries(db.users).sort((a, b) => b[1].money - a[1].money).slice(0, 10).map(entry => entry[0]);
-				let teksnya = '╭──❍「 *LEADERBOARD* 」❍\n'
-				for (let i = 0; i < entries.length; i++) {
-					teksnya += `│• ${i + 1}. @${entries[i].split('@')[0]}\n│• Balance : ${db.users[entries[i]].money.toLocaleString('id-ID')}\n│\n`
-				}
-				m.reply(teksnya + '╰──────❍');
-			}
-			break
-			case 'req': case 'request': {
-				if (!text) return m.reply('Mau Request apa ke Owner?')
-				await m.reply(`*Request Telah Terkirim Ke Owner*\n_Terima Kasih🙏_`)
-				await voxel.sendFromOwner(ownerNumber, `Pesan Dari : @${m.sender.split('@')[0]}\nUntuk Owner\n\nRequest ${text}`, m, { contextInfo: { mentionedJid: [m.sender], isForwarded: true }})
-			}
-			break
-			case 'totalfitur': {
-				const total = ((fs.readFileSync(__filename).toString()).match(/case '/g) || []).length
-				m.reply(`Total Fitur : ${total}`);
-			}
-			break
-			case 'daily': case 'claim': {
-				daily(m, db)
-			}
-			break
-			case 'transfer': case 'tf': {
-				transfer(m, args, db, voxel, store)
-			}
-			break
-			case 'buy': {
-				buy(m, args, db)
-			}
-			break
-			case 'react': {
-				voxel.sendMessage(m.chat, { react: { text: args[0], key: m.quoted ? m.quoted.key : m.key }})
-			}
-			break
-			case 'tagme': {
-				m.reply(`@${m.sender.split('@')[0]}`, { mentions: [m.sender] })
-			}
-			break
 			case 'runtime': case 'tes': case 'bot': {
 				if (!args[0] && !args[1]) return m.reply(`*Bot Telah Online Selama*\n*${runtime(process.uptime())}*`);
 				switch(args[0]) {
@@ -3048,11 +2909,20 @@ Select Bot Settings:
 				if (!isUrl(text) || !/youtu\.?be/.test(text)) return m.reply('Url Youtube Tidak Valid!')
 				m.react('⏳')
 				try {
-					const res = await fetchApi('/download/ytmp3', { url: text }, { name: 'betabotz' })
-					const hasil = res.result || res
-					const dl = hasil.mp3 || hasil.url || hasil.dl || hasil.link || hasil.download
-					if (!dl) throw new Error('[BetaBotz] Format respons tidak dikenali: ' + JSON.stringify(res))
-					await m.reply({ audio: { url: dl }, mimetype: 'audio/mpeg', fileName: `${hasil.title || 'audio'}.mp3`, caption: `*Title:* ${hasil.title || 'Tidak tersedia'}` })
+					let dl, title;
+					try {
+						const res = await fetchApi('/download/ytmp3', { url: text }, { name: 'betabotz' })
+						const hasil = res.result || res
+						dl = hasil.mp3 || hasil.url || hasil.dl || hasil.link || hasil.download
+						title = hasil.title
+						if (!dl) throw new Error('[BetaBotz] Format respons tidak dikenali: ' + JSON.stringify(res))
+					} catch (apiErr) {
+						// Fallback: API utama down, download langsung pakai ytdl-core (lokal, no API)
+						const hasil = await ytMp3(text)
+						dl = hasil.result
+						title = hasil.title
+					}
+					await m.reply({ audio: { url: dl }, mimetype: 'audio/mpeg', fileName: `${title || 'audio'}.mp3`, caption: `*Title:* ${title || 'Tidak tersedia'}` })
 					setLimit(m, db)
 				} catch (e) {
 					console.log(e)
@@ -3065,16 +2935,28 @@ Select Bot Settings:
 				if (!text) return m.reply(`Example: ${prefix + command} https://youtu.be/xxxxx`)
 				if (!isUrl(text) || !/youtu\.?be/.test(text)) return m.reply('Url Youtube Tidak Valid!')
 				m.react('⏳')
+				let localFile = null
 				try {
-					const res = await fetchApi('/download/ytmp4', { url: text }, { name: 'betabotz' })
-					const hasil = res.result || res
-					const dl = hasil.download || hasil.url || hasil.dl || hasil.link || hasil.mp4
-					if (!dl) throw new Error('[BetaBotz] Format respons tidak dikenali: ' + JSON.stringify(res))
-					await m.reply({ video: { url: dl }, mimetype: 'video/mp4', fileName: `${hasil.title || 'video'}.mp4`, caption: `*Title:* ${hasil.title || 'Tidak tersedia'}` })
+					let dl, title
+					try {
+						const res = await fetchApi('/download/ytmp4', { url: text }, { name: 'betabotz' })
+						const hasil = res.result || res
+						dl = hasil.download || hasil.url || hasil.dl || hasil.link || hasil.mp4
+						title = hasil.title
+						if (!dl) throw new Error('[BetaBotz] Format respons tidak dikenali: ' + JSON.stringify(res))
+						await m.reply({ video: { url: dl }, mimetype: 'video/mp4', fileName: `${title || 'video'}.mp4`, caption: `*Title:* ${title || 'Tidak tersedia'}` })
+					} catch (apiErr) {
+						// Fallback: API utama down, download+merge langsung pakai ytdl-core+ffmpeg (lokal, no API)
+						const hasil = await ytMp4(text)
+						localFile = hasil.result
+						await m.reply({ video: fs.readFileSync(localFile), mimetype: 'video/mp4', fileName: `${hasil.title || 'video'}.mp4`, caption: `*Title:* ${hasil.title || 'Tidak tersedia'}` })
+					}
 					setLimit(m, db)
 				} catch (e) {
 					console.log(e)
 					m.reply(global.mess.fail)
+				} finally {
+					if (localFile && fs.existsSync(localFile)) fs.unlinkSync(localFile)
 				}
 			}
 			break
@@ -3157,11 +3039,121 @@ Select Bot Settings:
 				if (!isLimit) return m.reply(global.mess.limit)
 				if (!text) return m.reply(`Example: ${prefix + command} usernamenya`)
 				try {
-					const anu = await fetchApi('/stalk/github', { username: text });
-					const res = anu.result || anu.data || anu;
-					m.reply({ image: { url: res.avatar_url || res.avatar }, caption: `*Username :* ${res.login || res.username || text}\n*Nickname :* ${res.name || 'Tidak ada'}\n*Bio :* ${res.bio || 'Tidak ada'}\n*Company :* ${res.company || 'Tidak ada'}\n*Blog :* ${res.blog || res.website || 'Tidak ada'}\n*Location :* ${res.location || 'Tidak ada'}\n*Public Repo :* ${res.public_repos ?? '-'}\n*Followers :* ${res.followers ?? '-'}\n*Following :* ${res.following ?? '-'}` })
+					let res;
+					try {
+						const anu = await fetchApi('/stalk/github', { username: text });
+						res = anu.result || anu.data || anu;
+					} catch (apiErr) {
+						// Fallback: API utama down, pakai API resmi GitHub langsung (Cantarella)
+						res = await githubstalkFallback(text);
+					}
+					m.reply({ image: { url: res.avatar_url || res.avatar || res.profile_pic }, caption: `*Username :* ${res.login || res.username || text}\n*Nickname :* ${res.name || res.nickname || 'Tidak ada'}\n*Bio :* ${res.bio || 'Tidak ada'}\n*Company :* ${res.company || 'Tidak ada'}\n*Blog :* ${res.blog || res.website || 'Tidak ada'}\n*Location :* ${res.location || 'Tidak ada'}\n*Public Repo :* ${res.public_repos ?? '-'}\n*Followers :* ${res.followers ?? '-'}\n*Following :* ${res.following ?? '-'}` })
 				} catch (e) {
 					m.reply('Username Tidak ditemukan!')
+				}
+			}
+			break
+			case 'ffstalk': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} 123456789`)
+				m.react('⏳')
+				try {
+					const res = await ffstalk(text)
+					m.reply(`*🎮 Free Fire Stalk*\n\n*ID:* ${res.id}\n*Nickname:* ${res.nickname}`)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply('ID Free Fire tidak ditemukan!')
+				}
+			}
+			break
+			case 'mlstalk': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				const [gameId, zoneId] = text.split(/\s+/)
+				if (!gameId || !zoneId) return m.reply(`Example: ${prefix + command} 123456789 1234`)
+				m.react('⏳')
+				try {
+					const res = await mlstalk(gameId, zoneId)
+					m.reply(`*🎮 Mobile Legends Stalk*\n\n*ID:* ${gameId} (${zoneId})\n*Nickname:* ${res.username || res.nickname || JSON.stringify(res)}`)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply('ID Mobile Legends tidak ditemukan!')
+				}
+			}
+			break
+			case 'npmstalk': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} express`)
+				m.react('⏳')
+				try {
+					const res = await npmstalk(text)
+					m.reply(`*📦 NPM Stalk: ${res.name}*\n\n*Versi terbaru:* ${res.versionLatest}\n*Versi pertama:* ${res.versionPublish}\n*Total rilis:* ${res.versionUpdate}\n*Dependencies (terbaru):* ${res.latestDependencies}\n*Pertama publish:* ${res.publishTime}\n*Update terakhir:* ${res.latestPublishTime}`)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply('Paket npm tidak ditemukan!')
+				}
+			}
+			break
+			case 'lirik': case 'lyrics': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} Payung Teduh - Akad`)
+				m.react('⏳')
+				try {
+					const res = await lyricsSearch(text)
+					m.reply(`*🎵 ${res.trackName}*\n_by ${res.artistName}_\n\n${res.lyrics}\n\n> Sumber: ${res.source}`)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply('Lirik tidak ditemukan!')
+				}
+			}
+			break
+			case 'twitterdl': case 'twitter': case 'xdl': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				const dlUrl = resolveDownloadUrl(text, m.quoted)
+				if (!dlUrl) return m.reply(`Example: ${prefix + command} https://x.com/.../status/...\n_(atau reply pesan yang ada link X/Twitter-nya)_`)
+				m.react('⏳')
+				try {
+					const res = await twitterdl(dlUrl)
+					const video = res?.result?.url || res?.url || res?.result?.video
+					if (!video) return m.reply('Video tidak ditemukan!')
+					await voxel.sendFileUrl(m.chat, video, 'Twitter/X Download', m)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply(global.mess.fail)
+				}
+			}
+			break
+			case 'animesearch': case 'anime': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!text) return m.reply(`Example: ${prefix + command} Naruto`)
+				m.react('⏳')
+				try {
+					const res = await animeSearch(text)
+					const list = res?.data || res?.results || res
+					if (!Array.isArray(list) || !list.length) return m.reply('Anime tidak ditemukan!')
+					const teks = list.slice(0, 10).map((a, i) => `${i + 1}. ${a.title || a.judul}${a.status ? ` (${a.status})` : ''}`).join('\n')
+					m.reply(`*🎌 Hasil Pencarian Anime: ${text}*\n\n${teks}`)
+					setLimit(m, db)
+				} catch (e) {
+					m.reply(global.mess.fail)
+				}
+			}
+			break
+			case 'nanoedit': case 'aiedit': {
+				if (!isLimit) return m.reply(global.mess.limit)
+				if (!/image/.test(mime)) return m.reply(`Kirim/reply gambar dengan caption *${prefix + command} <perintah editnya>*\nExample: ${prefix + command} hapus background`)
+				if (!text) return m.reply('Kasih tau mau diedit jadi apa gambarnya!\nExample: hapus background, ganti jadi gaya anime, dll')
+				m.react('⏳')
+				const media = await voxel.downloadAndSaveMediaMessage(qmsg)
+				try {
+					const buffer = fs.readFileSync(media)
+					const url = await nanoEdit(buffer, text)
+					await m.reply({ image: { url }, caption: global.mess.done })
+					setLimit(m, db)
+				} catch (e) {
+					console.log(e)
+					m.reply('Gagal edit gambar, coba lagi nanti!')
+				} finally {
+					if (fs.existsSync(media)) fs.unlinkSync(media)
 				}
 			}
 			break
@@ -3292,16 +3284,26 @@ Select Bot Settings:
 				const dlUrl = resolveDownloadUrl(text, m.quoted)
 				if (!dlUrl) return m.reply(`Example: ${prefix + command} url_facebook\n_(atau reply pesan yang ada link Facebook-nya)_`)
 				if (!dlUrl.includes('facebook.com')) return m.reply('Url Tidak Mengandung Result Dari Facebook!')
+				m.react('⏳')
 				try {
-					const hasil = await fetchApi('/d/facebook', { url: dlUrl });
-					if (!hasil.result.hd && !hasil.result.sd) {
-						m.reply('Video Tidak ditemukan!')
-					} else {
-						m.react('⏳')
-						await voxel.sendFileUrl(m.chat, hasil.result.hd || hasil.result.sd, `*🎐Title:* ${hasil.result.title}`, m);
+					let videoUrl, title;
+					try {
+						const hasil = await fetchApi('/d/facebook', { url: dlUrl });
+						if (!hasil.result.hd && !hasil.result.sd) throw new Error('API utama: video tidak ditemukan')
+						videoUrl = hasil.result.hd || hasil.result.sd;
+						title = hasil.result.title;
+					} catch (apiErr) {
+						// Fallback: API utama down, pakai scraper getfvid.com (Cantarella)
+						// -- confidence rendah, cookie/selector-nya udah lama.
+						const hasil = await facebookFallback(dlUrl);
+						videoUrl = hasil.video || hasil.audio;
+						title = 'Facebook Video';
+						if (!videoUrl) throw new Error('Fallback juga gagal: video tidak ditemukan')
 					}
+					await voxel.sendFileUrl(m.chat, videoUrl, `*🎐Title:* ${title}`, m);
 					setLimit(m, db)
 				} catch (e) {
+					console.log(e)
 					m.reply(global.mess.fail)
 				}
 			}
@@ -3547,18 +3549,6 @@ Select Bot Settings:
 			break
 			
 			// Game Menu
-			case 'slot': {
-				await gameSlot(voxel, m, db)
-			}
-			break
-			case 'casino': {
-				await gameCasinoSolo(voxel, m, prefix, db)
-			}
-			break
-			case 'samgong': case 'kartu': {
-				await gameSamgongSolo(voxel, m, db)
-			}
-			break
 			case 'rampok': case 'merampok': {
 				await gameMerampok(m, db)
 			}
@@ -4278,6 +4268,7 @@ Select Bot Settings:
 │${setv} ${prefix}tiktokmp3 (url)
 │${setv} ${prefix}tiktoksearch (kata kunci)
 │${setv} ${prefix}tiktokrandom (kata kunci)
+│${setv} ${prefix}megadl (url)
 │${setv} ${prefix}facebook (url)
 │${setv} ${prefix}spotifydl (url)
 ╰─┬────❍
@@ -4355,6 +4346,9 @@ Select Bot Settings:
 │${setv} ${prefix}rate (reply pesan)
 │${setv} ${prefix}jodohku
 │${setv} ${prefix}jadian
+│${setv} ${prefix}bucin 
+│${setv} ${prefix}motivasi
+│${setv} ${prefix}quoted
 │${setv} ${prefix}fitnah
 │${setv} ${prefix}halah (text)
 │${setv} ${prefix}hilih (text)
@@ -4523,6 +4517,7 @@ Select Bot Settings:
 │${setv} ${prefix}tiktokmp3 (url)
 │${setv} ${prefix}tiktoksearch (kata kunci)
 │${setv} ${prefix}tiktokrandom (kata kunci)
+│${setv} ${prefix}megadl (url)
 │${setv} ${prefix}facebook (url)
 │${setv} ${prefix}spotifydl (url)
 ╰──────❍`)
@@ -4572,33 +4567,6 @@ Select Bot Settings:
 │${setv} ${prefix}nightcore (reply audio)
 │${setv} ${prefix}getexif (reply sticker)
 ╰──────❍`)
-			}
-			break
-			case 'ai': {
-				if (!isLimit) return m.reply(global.mess.limit)
-				if (!text) return m.reply(`Example: ${prefix + command} apa itu lubang hitam`)
-				m.react('⏳')
-				try {
-					const hasil = await fetchApi('/ai/glm47flash', { query: text }, { name: 'voxel' });
-					await m.reply(hasil?.data?.response || hasil?.result || hasil?.data || 'Maaf, tidak ada jawaban.')
-					setLimit(m, db)
-				} catch (e) {
-          m.react('❌')
-					m.reply(global.mess.fail + e)
-				}
-			}
-			break
-			case 'gemini': {
-				if (!isLimit) return m.reply(global.mess.limit)
-				if (!text) return m.reply(`Example: ${prefix + command} apa itu lubang hitam`)
-				m.react('⏳')
-				try {
-					const hasil = await fetchApi('/ai/gemini', { query: text });
-					await m.reply(hasil?.result?.message || hasil?.result || hasil?.data || 'Maaf, tidak ada jawaban.')
-					setLimit(m, db)
-				} catch (e) {
-					m.reply(global.mess.fail)
-				}
 			}
 			break
 			case 'glm': {
@@ -4693,6 +4661,19 @@ Select Bot Settings:
 │${setv} ${prefix}archipelago (query)
 │${setv} ${prefix}deepseek (query)
 │${setv} ${prefix}txt2img (query)
+├──❍「 *AI Tanpa API Key* 」❍
+│${setv} ${prefix}gpt5 (query)
+│${setv} ${prefix}claudehaiku (query)
+│${setv} ${prefix}qwen3 (query)
+│${setv} ${prefix}deepthink (query)
+│${setv} ${prefix}dolphin (query)
+│${setv} ${prefix}matematika (soal)
+│${setv} ${prefix}muslimai (query)
+│${setv} ${prefix}feelbetter (curhat)
+│${setv} ${prefix}simi (query)
+│${setv} ${prefix}quilbot (teks)
+│${setv} ${prefix}waguri (query)
+│${setv} ${prefix}kobo-ai (query)
 ╰──────❍`)
 			}
 			break
@@ -4756,6 +4737,9 @@ Select Bot Settings:
 │${setv} ${prefix}rate (reply pesan)
 │${setv} ${prefix}jodohku
 │${setv} ${prefix}jadian
+│${setv} ${prefix}bucin
+│${setv} ${prefix}motivasi
+│${setv} ${prefix}quoted
 │${setv} ${prefix}fitnah
 │${setv} ${prefix}halah (text)
 │${setv} ${prefix}hilih (text)

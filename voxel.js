@@ -1804,7 +1804,7 @@ const voxel = async (voxel, m, msg, store) => {
 				await voxel.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: isOwnMessage ? true : false, id: m.quoted.id, participant: m.quoted.sender }})
 			}
 			break
-			case 'pin': case 'unpin': {
+			case 'pinm': case 'unpinm': {
 				if (!m.isGroup) return m.reply(global.mess.group)
 				if (!m.isAdmin) return m.reply(global.mess.admin)
 				if (!m.isBotAdmin) return m.reply(global.mess.botAdmin)
@@ -2960,7 +2960,7 @@ Select Bot Settings:
 				}
 			}
 			break
-		  case 'pinterest': case 'pint': {
+		  case 'pinterest': case 'pin': {
         if (!isLimit) return m.reply(global.mess.limit)
         if (!text) return m.reply(`Example: ${prefix + command} hu tao`)
 

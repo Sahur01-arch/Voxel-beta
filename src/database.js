@@ -213,6 +213,25 @@ const addExpired = ({ id, expired, ...options }, _dir) => {
 	}
 };
 
+///XP & level (dikelola sistem, user nggak bisa nambah sendiri).
+// Kebutuhan XP per level = 100 x level, jadi makin tinggi level makin mahal --
+// ini yang bikin grinding chat XP tetap tethered tanpa perlu rate-limit.
+const xpRequired = (level) => Math.max(1, (level || 1) * 100)
+
+const addXp = (jid, db, jumlah = 1) => {
+	const u = db?.users?.[jid]
+	if (!u) return null
+	u.level = u.level || 1
+	u.xp = (u.xp || 0) + jumlah
+	u.xpRequired = u.xpRequired || xpRequired(u.level)
+	while (u.xp >= u.xpRequired) {
+		u.xp -= u.xpRequired
+		u.level++
+		u.xpRequired = xpRequired(u.level)
+	}
+	return u
+}
+
 const getPosition = (id, _dir) => _dir.findIndex(a => a.id === id || a.url === id);
 
 const getExpired = (id, _dir) => _dir.find(a => a.id === id || a.url === id)?.expired;
@@ -242,6 +261,8 @@ export {
 	cmdAdd,
 	cmdDel,
 	cmdAddHit,
+	addXp,
+	xpRequired,
 	addExpired,
 	getPosition,
 	getStatus,

@@ -80,6 +80,118 @@ function resolveFromLidMap(jid) {
 	return global.db?.lidMap?.[jid] || jid;
 }
 
+// ============================================================
+// RELOAD PESERTA + RESOLVER LID -> JID
+// ============================================================
+// Gejalanya: .tagall/.hidetag nampilin @<lid>, leaderboard nampilin orang yang
+// sama 2x, dan .profile "hilang" padahal datanya ada -- semua karena peta
+// lid -> nomorHp belum lengkap. Sumber kebenaran-nya ada di participants:
+// bentuknya (dari lib/Socket/groups.js) { id, phoneNumber?, lid?, admin? }.
+// Kalau `id` berakhiran @lid, nomor aslinya ada di `phoneNumber` (dan sebaliknya).
+// Peta ini disimpan PERMANEN di global.db.lidMap supaya nggak hilang tiap restart.
+
+const isLid = (jid) => !!jid?.endsWith('@lid')
+const isPn = (jid) => !!jid?.endsWith('@s.whatsapp.net')
+
+// Catat satu pasangan lid <-> nomorHp ke peta permanen, lalu GABUNGKAN data user
+// yang pernah kesimpen di key @lid ke key nomorHp (linkLidToPhone yang di atas).
+function rememberLidPair(lid, pn) {
+	if (!isLid(lid) || !isPn(pn)) return false
+	if (!global.db) return false
+	global.db.lidMap ||= {}
+	if (global.db.lidMap[lid] === pn) return false
+	global.db.lidMap[lid] = pn
+	if (global.db.users?.[lid]) linkLidToPhone(lid, pn)
+	return true
+}
+
+/**
+ * Telusuri SEMUA participants di store (grup + contacts) lalu:
+ * 1) isi global.db.lidMap,
+ * 2) pastikan tiap participant punya `id` DAN `phoneNumber` terisi -- tanpa ini
+ *    .tagall/.hidetag/.totag crash (mem.phoneNumber.split) atau nge-tag @lid,
+ * 3) rapikan key user yang nyangkut di @lid supaya leaderboard/profil nggak dobel.
+ * Idempotent & murah, aman dipanggil tiap metadata sync.
+ */
+export function normalizeLidParticipants(store) {
+	const stat = { mapped: 0, merged: 0, participants: 0 }
+	if (!global.db) return stat
+	global.db.lidMap ||= {}
+
+	for (const contact of Object.values(store?.contacts || {})) {
+		if (rememberLidPair(contact?.id, contact?.phoneNumber)) stat.mapped++
+	}
+	for (const meta of Object.values(store?.groupMetadata || {})) {
+		if (!meta?.participants) continue
+		for (const p of meta.participants) {
+			// Bentuk 1: id = @lid, phoneNumber = nomorHp
+			if (isLid(p?.id) && isPn(p?.phoneNumber)) {
+				if (rememberLidPair(p.id, p.phoneNumber)) stat.mapped++
+			} else if (isPn(p?.id) && isLid(p?.lid)) {
+				// Bentuk 2: id = nomorHp, lid ada di field terpisah
+				if (rememberLidPair(p.lid, p.id)) stat.mapped++
+			} else if (isLid(p?.phoneNumber) && isPn(p?.id)) {
+				if (rememberLidPair(p.phoneNumber, p.id)) stat.mapped++
+			}
+		}
+		// Jaring pengaman: participant yang datanya belum lengkap (misal cuma ada
+		// satu sisi, atau sisi @lid yang belum terpetakan) dicoba dicocokkan lewat
+		// peta -- kalau ketemu, kedua field diisi dengan nomor yang sama.
+		meta.participants = meta.participants.map((p) => {
+			const pair = rememberFromPeta(p)
+			if (pair) {
+				p.id = p.id || pair
+				p.phoneNumber = pair
+			} else {
+				p.id = p.id || p.phoneNumber || p.lid
+				p.phoneNumber = p.phoneNumber || (isPn(p.id) ? p.id : p.lid || p.id)
+			}
+			return p
+		})
+		stat.participants += meta.participants.length
+	}
+
+	// Sisa-sisa key @lid yang peta-nya sudah ada tapi barisnya belum pernah kebaca
+	// live turn ini (misal user yang cuma aktif di grup lain).
+	for (const [lid, pn] of Object.entries(global.db.lidMap)) {
+		if (global.db.users?.[lid]) { linkLidToPhone(lid, pn); stat.merged++ }
+	}
+	for (const [k, v] of Object.entries(store?.contacts || {})) {
+		if (isLid(k) && global.db.lidMap[k]) store.contacts[global.db.lidMap[k]] = { ...v, id: global.db.lidMap[k] }
+	}
+	return stat
+}
+
+function rememberFromPeta(p) {
+	const kandidat = [p?.id, p?.phoneNumber, p?.lid].filter(Boolean)
+	for (const k of kandidat) {
+		const pn = global.db.lidMap?.[k]
+		if (isPn(pn)) return pn
+	}
+	return null
+}
+
+/**
+ * Minta ulang metadata SEMUA grup yang bot ini ikuti, lalu normalisasi
+ * lid -> nomorHp-nya. Dipakai .reloadparticipant, dan juga otomatis saat start /
+ * sebelum shutdown lewat syncGroupMetadataCache({ force: true }).
+ */
+export async function reloadAllParticipants(voxel, store) {
+	if (!voxel || !store) return { groups: 0, mapped: 0, participants: 0 }
+	store.groupMetadata ||= {}
+	const semua = await voxel.groupFetchAllParticipating().catch(() => ({}))
+	const ids = new Set([...Object.keys(semua || {}), ...Object.keys(store.groupMetadata)])
+	let groups = 0
+	for (const id of ids) {
+		const fresh = await voxel.groupMetadata(id).catch(() => null)
+		const meta = fresh || semua?.[id]
+		if (!meta) continue
+		store.groupMetadata[id] = { ...(store.groupMetadata[id] || {}), ...meta }
+		groups++
+	}
+	return { groups, ...normalizeLidParticipants(store) }
+}
+
 /*
 	* Create By Voxel
 	* Base Bot: Hitori MD - https://github.com/nazedev/hitori
@@ -125,15 +237,12 @@ export async function syncGroupMetadataCache(voxel, store, { force = false } = {
 		}
 	}
 
-	if (force && store.groupMetadata) {
-		for (const [id, metadata] of Object.entries(store.groupMetadata)) {
-			if (!metadata || !metadata.participants) continue;
-			metadata.participants = metadata.participants.map((p) => ({
-				...p,
-				id: p.id || p.phoneNumber || p.jid,
-				phoneNumber: p.phoneNumber || p.id || p.jid,
-			}));
-		}
+	// Resolusi lid -> nomorHp WAJIB jalan di setiap sync (bukan cuma force):
+	// inilah yang bikin .tagall nampilin @nomor (bukan @lid) dan leaderboard
+	// nggak dobel, termasuk langsung setelah restart.
+	const lid = normalizeLidParticipants(store);
+	if (force && (lid.mapped || lid.merged)) {
+		console.log(`[METADATA] Resolved ${lid.mapped} lid, merge ${lid.merged} user, ${lid.participants} peserta dari ${Object.keys(store.groupMetadata).length} grup.`);
 	}
 
 	return store.groupMetadata;
@@ -357,7 +466,27 @@ async function LoadDataBase(voxel, m) {
 			lastclaim: Date.now(),
 			lastbegal: Date.now(),
 			lastrampok: Date.now(),
+			// --- PROFIL ---
+			// Cuma name/gender/age/bio yang boleh diubah user sendiri (lewat
+			// command .profile set*), sisanya Strictly dikelola sistem.
+			name: m.pushName || '-',
+			gender: '-',
+			age: '-',
+			bio: '-',
+			role: 'User',
+			level: 1,
+			xp: 0,
+			xpRequired: 100,
+			premium: false,
+			chatCount: 0,
+			commandCount: 0,
+			lastCommand: '-',
+			createdAt: new Date().toISOString(),
+			lastSeen: new Date().toISOString(),
+			badges: [], // Disiapkan saja, belum ada logika badge sama sekali.
 		};
+		// Status premium mengikuti daftar premium global, bukan diisi user.
+		user.premium = checkStatus(m.sender, premium) || false;
 		for (let key in defaultUser) {
 			if (!(key in user)) user[key] = defaultUser[key];
 		}

@@ -31,7 +31,7 @@ import { sharpUpscale, imagemagickUpscale, jimpUpscale } from './lib/upscaler.js
 import templateMenu from './lib/template_menu.js';
 import { toAudio, toPTT } from './lib/converter.js';
 import { GroupUpdate, LoadDataBase } from './src/message.js';
-import { cmdAdd, cmdAddHit, addExpired, getPosition, getExpired, getStatus, checkStatus } from './src/database.js';
+import { cmdAdd, cmdAddHit, addExpired, addXp, getPosition, getExpired, getStatus, checkStatus } from './src/database.js';
 import { rdGame, iGame, gameSlot, gameCasinoSolo, gameSamgongSolo, gameMerampok, gameBegal, daily, buy, setLimit, addLimit, addMoney, setMoney, transfer, Blackjack, SnakeLadder } from './lib/game.js';
 import { getRandom, getBuffer, fetchJson, runtime, clockString, sleep, isUrl, formatDate, formatp, generateProfilePicture, errorCache, normalize, runUpdate, updateSettings, parseMention, fixBytes, similarity, pickRandom, encodeToLetters, tarBackup } from './lib/function.js';
 import { loadCommands } from './lib/command-loader.js';
@@ -180,6 +180,24 @@ const voxel = async (voxel, m, msg, store) => {
 		const quoted = m.quoted ? m.quoted : m
 		const command = isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : '';
 		const text = global.q = args.join(' ');
+
+		// Auto-tracking profil user (dikelola sistem, user cuma boleh ubah
+		// name/gender/age/bio). Ditaruh SEBELUM dispatch command eksternal
+		// di bawah, karena command dari folder commands/ langsung `return`
+		// dan nggak pernah sampai ke blok hit global -- kalau autog tracking
+		// ditaruh di sana, LastCmd/Cmds buat semua command external stuck "-"/0.
+		const profil = global.db.users[m.sender];
+		if (profil && !m.sender.endsWith('@g.us')) {
+			profil.lastSeen = new Date().toISOString();
+			profil.chatCount = (profil.chatCount || 0) + 1;
+			// XP: ngobrol di grup +2, pake command +10. Command yang ngabisin limit
+			// (game, AI, media) nambah +25 lagi dari setLimit() di lib/game.js.
+			addXp(m.sender, global.db, m.isGroup ? 2 : 10);
+			if (isCmd) {
+				profil.commandCount = (profil.commandCount || 0) + 1;
+				profil.lastCommand = command || '-';
+			}
+		}
 
 		// Set Mode -- HARUS jalan sebelum dispatch command eksternal (folder
 		// commands/) juga, bukan cuma buat command bawaan di switch di bawah.
@@ -1808,7 +1826,18 @@ const voxel = async (voxel, m, msg, store) => {
 				if (!m.isGroup) return m.reply(global.mess.group)
 				if (!m.isAdmin) return m.reply(global.mess.admin)
 				if (!m.isBotAdmin) return m.reply(global.mess.botAdmin)
-				await voxel.sendMessage(m.chat, { pin: { type: command == 'pin' ? 1 : 0, time: 2592000, key: m.quoted ? m.quoted.key : m.key }})
+				if (!m.quoted) return m.reply(global.mess.quoted)
+				const unpin = command.startsWith('unpin')
+				// WAProto.Message.PinInChatMessage: 1 = PIN_FOR_ALL, 2 = UNPIN_FOR_ALL.
+				// Bentuk pemanggilan WAIT: `pin` itu MessageKey-nya LANGSUNG, dan
+				// `type`/`time` itu key SEBELUMNYA di luar `pin`. Versi lama
+				// nge-send { pin: { type, time, key } } -- bikin pinInChatMessage.key
+				// jadi objek ngawur (nggak punya remoteJid/id) dan type-nya UNKNOWN_TYPE(0),
+				// makanya .pinm diam-diam nggak pernah ngepin apa-apa.
+				const key = { remoteJid: m.chat, fromMe: !!m.quoted.fromMe, id: m.quoted.id, participant: m.quoted.sender }
+				await voxel.sendMessage(m.chat, { pin: key, type: unpin ? 2 : 1, time: 2592000 })
+				.then(() => m.reply(unpin ? '*Berhasil lepas pin*' : '*Berhasil pin pesan ini*'))
+				.catch(() => m.reply(global.mess.fail))
 			}
 			break
 			case 'linkgroup': case 'linkgrup': case 'linkgc': case 'urlgroup': case 'urlgrup': case 'urlgc': {
@@ -1828,51 +1857,6 @@ const voxel = async (voxel, m, msg, store) => {
 				}).catch((err) => m.reply(global.mess.fail))
 			}
 			break
-			case 'group': case 'grup': case 'gc': {
-				if (!m.isGroup) return m.reply(global.mess.group)
-				if (!m.isAdmin) return m.reply(global.mess.admin)
-				if (!m.isBotAdmin) return m.reply(global.mess.botAdmin)
-				let set = db.groups[m.chat]
-				switch (args[0]?.toLowerCase()) {
-					case 'close': case 'open':
-					await voxel.groupSettingUpdate(m.chat, args[0] == 'close' ? 'announcement' : 'not_announcement').then(a => m.reply(`*Sukses ${args[0] == 'open' ? 'Membuka' : 'Menutup'} Group*`))
-					break
-					case 'join':
-					const _list = await voxel.groupRequestParticipantsList(m.chat).then(a => a.map(b => b.jid))
-					if (/(a(p|pp|cc)|(ept|rove))|true|ok/i.test(args[1]) && _list.length > 0) {
-						await voxel.groupRequestParticipantsUpdate(m.chat, _list, 'approve').catch(e => m.react('❌'))
-					} else if (/reject|false|no/i.test(args[1]) && _list.length > 0) {
-						await voxel.groupRequestParticipantsUpdate(m.chat, _list, 'reject').catch(e => m.react('❌'))
-					} else m.reply(`List Request Join :\n${_list.length > 0 ? '- @' + _list.join('\n- @').split('@')[0] : '*Nothing*'}\nExample : ${prefix + command} join acc/reject`)
-					break
-					case 'pesansementara': case 'disappearing':
-					if (/90|7|1|24|on/i.test(args[1])) {
-						voxel.sendMessage(m.chat, { disappearingMessagesInChat: /90/i.test(args[1]) ? 7776000 : /7/i.test(args[1]) ? 604800 : 86400 })
-					} else if (/0|off|false/i.test(args[1])) {
-						voxel.sendMessage(m.chat, { disappearingMessagesInChat: 0 })
-					} else m.reply('Silahkan Pilih :\n90 hari, 7 hari, 1 hari, off')
-					break
-					case 'antilink': case 'antivirtex': case 'antidelete': case 'welcome': case 'antitoxic': case 'waktusholat': case 'nsfw': case 'antihidetag': case 'setinfo': case 'antitagsw': case 'leave': case 'promote': case 'demote':
-					if (/on|true/i.test(args[1])) {
-						if (set[args[0]]) return m.reply('*Sudah Aktif Sebelumnya*')
-						set[args[0]] = true
-						m.reply('*Sukses Change To On*')
-					} else if (/off|false/i.test(args[1])) {
-						set[args[0]] = false
-						m.reply('*Sukses Change To Off*')
-					} else m.reply(`❗${args[0].charAt(0).toUpperCase() + args[0].slice(1)} on/off`)
-					break
-					case 'setwelcome': case 'setleave': case 'setpromote': case 'setdemote':
-					if (args[1]) {
-						set.text[args[0]] = args.slice(1).join(' ');
-						m.reply(`Sukses Mengubah ${args[0].split('set')[1]} Menjadi:\n${set.text[args[0]]}`)
-					} else m.reply(`Example:\n${prefix + command} ${args[0]} Isi Pesannya\n\nMisal Dengan tag:\n${prefix + command} ${args[0]} Kepada @\nMaka akan Menjadi:\nKepada @0\n\nMisal dengan Tag admin:\n${prefix + command} ${args[0]} Dari @admin untuk @\nMaka akan Menjadi:\nDari @${m.sender.split('@')[0]} untuk @0\n\nMisal dengan Nama grup:\n${prefix + command} ${args[0]} Dari @admin untuk @ di @subject\nMaka akan Menjadi:\nDari @${m.sender.split('@')[0]} untuk @0 di ${m.metadata.subject}`, { mentions: ['0@s.whatsapp.net'] })
-					break
-					default:
-					m.reply(`Settings Group ${m.metadata.subject}\n- open\n- close\n- join acc/reject\n- disappearing 90/7/1/off\n- antilink on/off ${set.antilink ? '🟢' : '🔴'}\n- antivirtex on/off ${set.antivirtex ? '🟢' : '🔴'}\n- antidelete on/off ${set.antidelete ? '🟢' : '🔴'}\n- welcome on/off ${set.welcome ? '🟢' : '🔴'}\n- leave on/off ${set.leave ? '🟢' : '🔴'}\n- promote on/off ${set.promote ? '🟢' : '🔴'}\n- demote on/off ${set.demote ? '🟢' : '🔴'}\n- setinfo on/off ${set.setinfo ? '🟢' : '🔴'}\n- nsfw on/off ${set.nsfw ? '🟢' : '🔴'}\n- waktusholat on/off ${set.waktusholat ? '🟢' : '🔴'}\n- antihidetag on/off ${set.antihidetag ? '🟢' : '🔴'}\n- antitoxic on/off ${set.antitoxic ? '🟢' : '🔴'}\n- antitagsw on/off ${set.antitagsw ? '🟢' : '🔴'}\n\n- setwelcome _textnya_\n- setleave _textnya_\n- setpromote _textnya_\n- setdemote _textnya_\n\nExample:\n${prefix + command} antilink off\n\n*Fitur terpisah (bukan on/off di sini):*\n- ${prefix}bansenyap @orang -- ban tanpa pengumuman (${set.bansenyap?.length || 0} orang aktif)\n- ${prefix}bansenyap del @orang\n- ${prefix}bansenyap list`)
-				}
-			}
-			break
 			case 'tagall': {
 				if (!m.isGroup) return m.reply(global.mess.group)
 				if (!m.isAdmin) return m.reply(global.mess.admin)
@@ -1882,9 +1866,12 @@ const voxel = async (voxel, m, msg, store) => {
 				let participants = m.metadata?.participants || [];
 				if (participants.length === 0) return m.reply('Data member grup tidak tersedia! Harap coba lagi nanti.')
 				for (let mem of participants) {
-					teks += `${setv} @${mem.phoneNumber.split('@')[0]}\n`
+					// Fallback ke id: participant yang masih cached dengan identitas @lid
+					// bisa punya phoneNumber kosong -- tanpa fallback ini @lid ikut ke-tag,
+					// dan .split di atas bikin crash.
+					teks += `${setv} @${(mem.phoneNumber || mem.id || '').split('@')[0]}\n`
 				}
-				await m.reply(teks, { mentions: participants.map(a => a.phoneNumber) })
+				await m.reply(teks, { mentions: participants.map(a => a.phoneNumber || a.id).filter(Boolean) })
 			}
 			break
 			case 'hidetag': case 'h': {
@@ -1893,7 +1880,7 @@ const voxel = async (voxel, m, msg, store) => {
 				if (!m.isBotAdmin) return m.reply(global.mess.botAdmin)
 				let participants = m.metadata?.participants || [];
 				if (participants.length === 0) return m.reply('Data member grup tidak tersedia! Harap coba lagi nanti.')
-				await m.reply(q ? q : '', { mentions: participants.map(a => a.phoneNumber) })
+				await m.reply(q ? q : '', { mentions: participants.map(a => a.phoneNumber || a.id).filter(Boolean) })
 			}
 			break
 			case 'totag': {
@@ -1904,7 +1891,7 @@ const voxel = async (voxel, m, msg, store) => {
 				delete m.quoted.chat
 				let participants = m.metadata?.participants || [];
 				if (participants.length === 0) return m.reply('Data member grup tidak tersedia! Harap coba lagi nanti.')
-				await voxel.sendMessage(m.chat, { forward: m.quoted.fakeObj(), mentions: participants.map(a => a.phoneNumber) })
+				await voxel.sendMessage(m.chat, { forward: m.quoted.fakeObj(), mentions: participants.map(a => a.phoneNumber || a.id).filter(Boolean) })
 			}
 			break
 			case 'listonline': case 'liston': {
@@ -4243,8 +4230,8 @@ Select Bot Settings:
 │${setv} ${prefix}linkgrup
 │${setv} ${prefix}revoke
 │${setv} ${prefix}tagall
-│${setv} ${prefix}pin
-│${setv} ${prefix}unpin
+│${setv} ${prefix}pinm (reply pesan)
+│${setv} ${prefix}unpinm (reply pesan)
 │${setv} ${prefix}hidetag
 │${setv} ${prefix}totag (reply pesan)
 │${setv} ${prefix}listonline
@@ -4484,8 +4471,8 @@ Select Bot Settings:
 │${setv} ${prefix}linkgrup
 │${setv} ${prefix}revoke
 │${setv} ${prefix}tagall
-│${setv} ${prefix}pin
-│${setv} ${prefix}unpin
+│${setv} ${prefix}pinm (reply pesan)
+│${setv} ${prefix}unpinm (reply pesan)
 │${setv} ${prefix}hidetag
 │${setv} ${prefix}totag (reply pesan)
 │${setv} ${prefix}listonline

@@ -1,5 +1,3 @@
-import { checkStatus, getExpired } from '../../src/database.js';
-import { formatDate } from '../../lib/function.js';
 import { CommandIndex } from '../../lib/command-loader.js';
 
 async function ownerCommand(ctx) {
@@ -9,13 +7,79 @@ async function ownerCommand(ctx) {
 	return voxel.sendContact(m.chat, ownerNumber, m);
 }
 
+// Command .profile: nampilin profil user + nge-ubah 4 field yang memang
+// boleh diubah user sendiri (name/gender/age/bio). Semua key lain read-only.
+const FIELDS = { setname: 'name', setgender: 'gender', setage: 'age', setbio: 'bio' };
+const LIMITS = { name: 25, gender: 15, age: 3, bio: 200 };
+
+// Anti "undefined/null/NaN" bocor ke output teks WA.
+const val = (v, fallback = '-') => {
+	const s = v === undefined || v === null ? '' : String(v).trim();
+	return !s || s === 'undefined' || s === 'null' || s === 'NaN' ? fallback : s;
+};
+const waktu = (v) => {
+	const d = new Date(v);
+	return isNaN(d.getTime()) ? '-' : d.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+};
+
+// "L"/"P"/"pria"/"wanita"/ngasal -> Laki-laki/Perempuan, sisanya '-'.
+function normGender(raw) {
+	const g = String(raw).toLowerCase();
+	if (/^(l|pria|laki|laki-laki|man|cowok)$/.test(g) || g.startsWith('laki')) return 'Laki-laki';
+	if (/^(p|wanita|perempuan|cewek)$/.test(g) || g.startsWith('perem')) return 'Perempuan';
+	return '-';
+}
+
 async function profileCommand(ctx) {
-	const { m, db, isCreator } = ctx;
-	const infoUser = db.users[m.sender];
-	const user = Object.keys(db.users);
-	const isVip = isCreator || (db.users[m.sender] ? db.users[m.sender].vip : false);
-	const isPremium = isCreator || checkStatus(m.sender, db.premium || []) || false;
-	return m.reply(`*👤Profile @${m.sender.split('@')[0]} :*\n🐋User Bot : ${user.includes(m.sender) ? 'True' : 'False'}\n🔥User : ${isVip ? 'VIP' : isPremium ? 'PREMIUM' : 'FREE'}${isPremium ? `\n⏳Expired : ${checkStatus(m.sender, db.premium || []) ? formatDate(getExpired(m.sender, db.premium)) : '-'}` : ''}\n🎫Limit : ${infoUser ? infoUser.limit : 0}\n💰Uang : ${infoUser ? infoUser.money.toLocaleString('id-ID') : '0'}`);
+	const { m, db, prefix, isCreator, args, voxel } = ctx;
+	const user = db.users[m.sender] || (db.users[m.sender] = {});
+
+	const sub = String(args[0] || '').toLowerCase();
+	const value = args.slice(1).join(' ').trim();
+	if (FIELDS[sub]) {
+		if (!value) return m.reply(`Usage: ${prefix}profile ${sub} <isi>\n\nsetname  : Nama (max ${LIMITS.name} karakter)\nsetgender: Laki-laki / Perempuan / -\nsetage   : Umur (angka 1-120)\nsetbio   : Bio (max ${LIMITS.bio} karakter)`);
+		if (value.length > LIMITS[FIELDS[sub]]) return m.reply(`Maksimal ${LIMITS[FIELDS[sub]]} karakter!`);
+		if (sub === 'setage' && (!/^\d{1,3}$/.test(value) || +value < 1 || +value > 120)) return m.reply('Umur harus angka 1-120!');
+		if (sub === 'setgender') return m.reply(`✅ Gender diubah: ${user.gender = normGender(value)}`);
+		user[FIELDS[sub]] = sub === 'setage' ? +value : value;
+		return m.reply(`✅ ${FIELDS[sub]} diubah: ${user[FIELDS[sub]]}`);
+	}
+
+	const online = Date.now() - new Date(user.lastSeen).getTime() < 5 * 60 * 1000;
+	let avatarUrl;
+  try {
+    avatarUrl = await voxel.profilePictureUrl(m.sender, 'image');
+  } catch (e) {
+    avatarUrl = 'https://i.pravatar.cc/500'; // fallback kalau foto profil private/kosong, ganti sesuai selera
+  }
+
+  return voxel.sendMessage(m.chat, {
+    image: { url: avatarUrl },
+    caption: `[ 👤 INFO ]
+Nama : ${val(user.name)}
+Gender : ${val(user.gender)}
+Umur : ${val(user.age)}
+Prefix : ${val(prefix)}
+
+[ 🏷️ STATUS ]
+Peran : ${val(user.role, 'User')}
+Level : ${val(user.level || 1, '1')} (${val(user.xp || 0, '0')} / ${val(user.xpRequired || 100, '100')} XP)
+Status : ${online ? 'Online' : 'Offline'}
+Premium : ${user.premium || isCreator ? 'Aktif' : 'Tidak'}
+
+[ 💬 AKTIVITAS ]
+Chat : ${val(user.chatCount || 0, '0')}
+Cmds : ${val(user.commandCount || 0, '0')}
+LastCmd : ${val(user.lastCommand)}
+Join : ${waktu(user.createdAt)}
+LastSeen : ${waktu(user.lastSeen)}
+
+[ 🎖️ BADGE ]
+Badge system: Incoming
+
+[ 🕊️ BIO ]
+${val(user.bio)}`
+  }, { quoted: m });
 }
 
 async function leaderboardCommand(ctx) {

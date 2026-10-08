@@ -13,7 +13,7 @@ import { fileTypeFromBuffer, fileTypeFromFile } from 'file-type';
 
 import { writeExif } from '../lib/exif.js';
 import { checkStatus } from './database.js';
-import { getBuffer, fixBytes } from '../lib/function.js';
+import { getBuffer, fixBytes, sleep } from '../lib/function.js';
 import { jidNormalizedUser, proto, getBinaryNodeChild, generateWAMessageContent, prepareWAMessageMedia, areJidsSameUser, extractMessageContent, generateMessageID, downloadContentFromMessage, generateWAMessageFromContent, jidDecode, generateWAMessage, getContentType, getDevice } from '@sairidev/baileys-new';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -92,6 +92,13 @@ function resolveFromLidMap(jid) {
 
 const isLid = (jid) => !!jid?.endsWith('@lid')
 const isPn = (jid) => !!jid?.endsWith('@s.whatsapp.net')
+
+// WA balas 429 "rate-overlimit" (statusCode 500) kalau query metadata grup
+// ditembak terlalu rapat. Boot dengan 60+ grup = 60+ query beruntun = bom
+// rate-limit, dan setiap send di grup juga bisa ikut gagal karena itu.
+// Jeda 1,2 detik/query jauh di bawah batas aman; 62 grup ~ 75 detik, ainda worth it
+// karena hasil_sync ini yang bikin tagall/leaderboard akurat.
+const jedaAntarGrup = 1200
 
 // Catat satu pasangan lid <-> nomorHp ke peta permanen, lalu GABUNGKAN data user
 // yang pernah kesimpen di key @lid ke key nomorHp (linkLidToPhone yang di atas).
@@ -183,6 +190,7 @@ export async function reloadAllParticipants(voxel, store) {
 	const ids = new Set([...Object.keys(semua || {}), ...Object.keys(store.groupMetadata)])
 	let groups = 0
 	for (const id of ids) {
+		if (groups) await sleep(jedaAntarGrup) // anti rate-overlimit, lihat jedaAntarGrup
 		const fresh = await voxel.groupMetadata(id).catch(() => null)
 		const meta = fresh || semua?.[id]
 		if (!meta) continue
@@ -226,8 +234,10 @@ export async function syncGroupMetadataCache(voxel, store, { force = false } = {
 		console.warn('[METADATA] Gagal refresh daftar grup participating:', e?.message || e);
 	}
 
+	let sudah = 0;
 	for (const id of [...refreshTargets]) {
 		try {
+			if (sudah++) await sleep(jedaAntarGrup); // anti rate-overlimit, lihat jedaAntarGrup
 			const fresh = await voxel.groupMetadata(id).catch(() => null);
 			if (fresh) {
 				store.groupMetadata[id] = { ...(store.groupMetadata[id] || {}), ...fresh };

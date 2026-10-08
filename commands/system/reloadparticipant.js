@@ -19,6 +19,10 @@ export default {
 		if (!isCreator) return m.reply(global.mess.owner)
 
 		const t0 = Date.now();
+		// 60+ grup x 1,2 detik jeda (anti rate-overlimit) = bisa sampai ~1 menit.
+		// Kabari dulu, biar nggak kelihatan bot mati.
+		const progres = await m.reply('⏳ Sinkronisasi participant... (1 detik per grup, tahan ya)')
+			.catch(() => null);
 		const stat = await reloadAllParticipants(voxel, store)
 			.catch((e) => ({ error: e?.message || String(e) }));
 

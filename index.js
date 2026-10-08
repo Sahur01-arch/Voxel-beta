@@ -312,6 +312,11 @@ async function startVoxelBot() {
 		version,
 		logger: level,
 		getMessage,
+		// WA balas 429 "rate-overlimit" (statusCode 500) kalau metadata grup di-query
+		// tiap kirim pesan. Default lib = `async () => undefined` (selalu query).
+		// Kita kasih cache store yang udah ke-sync, jadi query network cuma saat
+		// grup belum pernah di-cache.
+		cachedGroupMetadata: async (jid) => global.store?.groupMetadata?.[jid],
 		syncFullHistory: false,
 		maxMsgRetryCount: 15,
 		msgRetryCounterCache,

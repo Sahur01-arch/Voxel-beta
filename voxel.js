@@ -1822,7 +1822,9 @@ const voxel = async (voxel, m, msg, store) => {
 				await voxel.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: isOwnMessage ? true : false, id: m.quoted.id, participant: m.quoted.sender }})
 			}
 			break
-			case 'pinm': case 'unpinm': {
+			// Alias `unpin` sengaja ikut: `.pin` udah jadi alias Pinterest (case di bawah),
+// tapi `.unpin` nggak dipakai command lain -- jadi user nggak perlu hafal "unpinm".
+case 'pinm': case 'unpinm': case 'unpin': {
 				if (!m.isGroup) return m.reply(global.mess.group)
 				if (!m.isAdmin) return m.reply(global.mess.admin)
 				if (!m.isBotAdmin) return m.reply(global.mess.botAdmin)
